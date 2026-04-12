@@ -1,0 +1,344 @@
+
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  .shell { background: #111318; border-radius: 12px; font-family: var(--font-sans); overflow: hidden; }
+  .titlebar { background: #0d0f14; height: 32px; display: flex; align-items: center; padding: 0 12px; gap: 6px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .titlebar-title { font-size: 12px; color: #444441; margin: 0 auto; }
+  .tab-bar { display: flex; background: #1a1d24; border-bottom: 0.5px solid #2a2d35; padding: 0 12px; gap: 2px; }
+  .tab { padding: 8px 16px; font-size: 13px; cursor: pointer; border-radius: 6px 6px 0 0; color: #6b6a65; border-bottom: 2px solid transparent; }
+  .tab.active { color: #e8e6df; border-bottom: 2px solid #1D9E75; }
+  .screen { display: none; padding: 20px; }
+  .screen.active { display: flex; gap: 20px; align-items: flex-start; }
+  .panel { background: #1a1d24; border-radius: 12px; border: 0.5px solid #2a2d35; overflow: hidden; }
+  .panel-header { padding: 12px 16px; border-bottom: 0.5px solid #2a2d35; display: flex; align-items: center; gap: 10px; }
+  .panel-title { font-size: 14px; font-weight: 500; color: #e8e6df; }
+  .panel-sub { font-size: 12px; color: #6b6a65; margin-left: auto; }
+  .panel-body { padding: 16px; }
+  .total-display { text-align: center; padding: 20px 0 16px; border-bottom: 0.5px solid #2a2d35; margin-bottom: 16px; }
+  .total-label { font-size: 12px; color: #6b6a65; }
+  .total-val { font-size: 40px; font-weight: 500; color: #e8e6df; margin-top: 4px; }
+  .field-label { font-size: 12px; color: #6b6a65; margin-bottom: 6px; }
+  .field-input { width: 100%; background: #22262f; border: 0.5px solid #2a2d35; border-radius: 8px; padding: 10px 14px; font-size: 20px; font-weight: 500; color: #e8e6df; outline: none; text-align: right; }
+  .field-input:focus { border-color: #1D9E75; }
+  .change-row { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding: 10px 14px; background: #22262f; border-radius: 8px; }
+  .change-label { font-size: 13px; color: #6b6a65; }
+  .change-val { font-size: 20px; font-weight: 500; }
+  .btn { width: 100%; padding: 12px; border-radius: 8px; border: none; font-size: 14px; font-weight: 500; cursor: pointer; margin-top: 12px; }
+  .btn-primary { background: #1D9E75; color: #085041; }
+  .btn-primary:disabled { background: #22262f; color: #444441; cursor: not-allowed; }
+  .btn-danger { background: #1f1215; border: 0.5px solid #E24B4A; color: #E24B4A; margin-top: 8px; }
+  .btn-neutral { background: #22262f; border: 0.5px solid #2a2d35; color: #c2c0b6; margin-top: 8px; }
+  .summary { flex: 1; min-width: 180px; }
+  .summary-row { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-bottom: 0.5px solid #1e2128; color: #c2c0b6; }
+  .summary-row:last-child { border: none; color: #e8e6df; font-weight: 500; }
+  .qr-box { background: #ffffff; border-radius: 8px; padding: 12px; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; width: 140px; height: 140px; }
+  .qr-inner { width: 116px; height: 116px; background: #111318; border-radius: 4px; display: grid; grid-template-columns: repeat(10, 1fr); gap: 1px; padding: 6px; }
+  .qr-c { border-radius: 1px; }
+  .pix-amount { text-align: center; font-size: 22px; font-weight: 500; color: #EF9F27; margin-bottom: 4px; }
+  .pix-hint { text-align: center; font-size: 12px; color: #6b6a65; margin-bottom: 16px; }
+  .status-badge { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; }
+  .status-waiting { background: #2a2410; color: #EF9F27; }
+  .status-success { background: #0a1f14; color: #1D9E75; }
+  .status-offline { background: #1f1215; border: 0.5px solid #E24B4A; color: #E24B4A; }
+  .pulse { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .pulse-amber { background: #EF9F27; animation: blink 1.2s infinite; }
+  .pulse-green { background: #1D9E75; }
+  .pulse-red { background: #E24B4A; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  .card-machine { background: #22262f; border-radius: 12px; border: 0.5px solid #2a2d35; padding: 20px; text-align: center; margin-bottom: 16px; }
+  .machine-screen { background: #0d0f14; border-radius: 6px; padding: 12px; margin-bottom: 12px; }
+  .machine-label { font-size: 11px; color: #444441; margin-bottom: 4px; }
+  .machine-val { font-size: 22px; font-weight: 500; color: #378ADD; }
+  .machine-hint { font-size: 11px; color: #6b6a65; margin-top: 4px; }
+  .offline-toggle { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #6b6a65; margin-bottom: 12px; cursor: pointer; }
+  .toggle-box { width: 32px; height: 18px; background: #22262f; border-radius: 9px; border: 0.5px solid #2a2d35; position: relative; transition: background 0.2s; flex-shrink: 0; }
+  .toggle-box.on { background: #EF9F27; }
+  .toggle-knob { width: 12px; height: 12px; background: #e8e6df; border-radius: 50%; position: absolute; top: 2px; left: 3px; transition: left 0.2s; }
+  .toggle-box.on .toggle-knob { left: 17px; }
+  .step-nav { display: flex; gap: 6px; margin-top: 12px; }
+  .step-btn { flex: 1; padding: 9px; border-radius: 8px; border: 0.5px solid #2a2d35; background: #22262f; color: #c2c0b6; font-size: 12px; cursor: pointer; }
+  .step-btn:hover { background: #2a2d35; }
+  .step-btn.go { background: #1D9E75; border-color: #1D9E75; color: #085041; font-weight: 500; }
+  .step-dots { display: flex; gap: 4px; justify-content: center; margin-top: 10px; }
+  .step-dot { width: 6px; height: 6px; border-radius: 50%; background: #2a2d35; }
+  .step-dot.active { background: #1D9E75; }
+</style>
+
+<div class="shell">
+  <div class="titlebar">
+    <div class="dot" style="background:#E24B4A"></div>
+    <div class="dot" style="background:#EF9F27"></div>
+    <div class="dot" style="background:#1D9E75"></div>
+    <span class="titlebar-title">Pagamento — Venda #0042 · R$ 58,20</span>
+  </div>
+
+  <div class="tab-bar">
+    <div class="tab active" onclick="showTab('cash')">F3 · Dinheiro</div>
+    <div class="tab" onclick="showTab('pix')">F4 · PIX</div>
+    <div class="tab" onclick="showTab('card')">F5 · Cartão</div>
+  </div>
+
+  <div id="screen-cash" class="screen active">
+    <div class="panel" style="flex:1">
+      <div class="panel-header">
+        <span style="width:10px;height:10px;border-radius:50%;background:#1D9E75;display:inline-block"></span>
+        <span class="panel-title">Pagamento em dinheiro</span>
+        <span class="panel-sub">Esc para cancelar</span>
+      </div>
+      <div class="panel-body">
+        <div class="total-display">
+          <div class="total-label">Total a pagar</div>
+          <div class="total-val">R$ 58,20</div>
+        </div>
+        <div class="field-label">Valor recebido</div>
+        <input class="field-input" id="cash-input" type="number" value="60" min="0" step="0.01" oninput="calcChange()">
+        <div class="change-row">
+          <span class="change-label">Troco</span>
+          <span class="change-val" id="change-val" style="color:#1D9E75">R$ 1,80</span>
+        </div>
+        <button class="btn btn-primary" id="cash-confirm" onclick="cashStep()">Confirmar pagamento</button>
+        <button class="btn btn-danger">Cancelar venda</button>
+      </div>
+    </div>
+    <div class="summary panel">
+      <div class="panel-header"><span class="panel-title">Resumo</span></div>
+      <div class="panel-body">
+        <div class="summary-row"><span>Tomate 1,350kg</span><span>R$ 9,32</span></div>
+        <div class="summary-row"><span>Leite Integral ×2</span><span>R$ 9,00</span></div>
+        <div class="summary-row"><span>Arroz 5kg</span><span>R$ 24,90</span></div>
+        <div class="summary-row"><span>Feijão ×2</span><span>R$ 14,98</span></div>
+        <div class="summary-row"><span>Total</span><span>R$ 58,20</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="screen-pix" class="screen">
+    <div class="panel" style="flex:1">
+      <div class="panel-header">
+        <span style="width:10px;height:10px;border-radius:50%;background:#EF9F27;display:inline-block"></span>
+        <span class="panel-title">Pagamento via PIX</span>
+        <span class="panel-sub">Esc para cancelar</span>
+      </div>
+      <div class="panel-body">
+        <label class="offline-toggle" onclick="toggleOffline()">
+          <div class="toggle-box" id="offline-toggle"><div class="toggle-knob"></div></div>
+          Simular modo offline (sem internet)
+        </label>
+        <div id="pix-online">
+          <div id="pix-waiting">
+            <div class="status-badge status-waiting">
+              <div class="pulse pulse-amber"></div>
+              Aguardando pagamento PIX...
+            </div>
+            <div class="qr-box" id="qr-dynamic"></div>
+            <div class="pix-amount">R$ 58,20</div>
+            <div class="pix-hint">QR code gerado via Mercado Pago · expira em 10 min</div>
+            <button class="btn btn-primary" onclick="pixConfirm()">Confirmar recebimento manual</button>
+            <button class="btn btn-neutral" onclick="pixConfirm()">Reenviar cobrança</button>
+            <button class="btn btn-danger">Cancelar venda</button>
+          </div>
+          <div id="pix-done" style="display:none;text-align:center;padding:20px 0">
+            <div class="status-badge status-success" style="justify-content:center">
+              <div class="pulse pulse-green"></div>
+              PIX recebido — venda concluída!
+            </div>
+            <div style="font-size:13px;color:#6b6a65;margin-top:12px">Recibo impresso automaticamente.</div>
+          </div>
+        </div>
+        <div id="pix-offline" style="display:none">
+          <div class="status-badge status-offline">
+            <div class="pulse pulse-red"></div>
+            Sem conexão — modo offline ativado
+          </div>
+          <div class="qr-box" id="qr-static"></div>
+          <div class="pix-amount">R$ 58,20</div>
+          <div class="pix-hint">QR code estático · gerado localmente com chave PIX da loja</div>
+          <div style="background:#22262f;border-radius:8px;padding:10px 14px;font-size:12px;color:#6b6a65;margin-bottom:12px;line-height:1.6">
+            O QR code será impresso no recibo.<br>
+            Verifique o recebimento no aplicativo do banco e confirme abaixo.
+          </div>
+          <button class="btn btn-primary" onclick="pixOfflineConfirm()">Recebi o PIX — confirmar venda</button>
+          <button class="btn btn-danger">Cancelar venda</button>
+        </div>
+      </div>
+    </div>
+    <div class="summary panel">
+      <div class="panel-header"><span class="panel-title">Resumo</span></div>
+      <div class="panel-body">
+        <div class="summary-row"><span>Tomate 1,350kg</span><span>R$ 9,32</span></div>
+        <div class="summary-row"><span>Leite Integral ×2</span><span>R$ 9,00</span></div>
+        <div class="summary-row"><span>Arroz 5kg</span><span>R$ 24,90</span></div>
+        <div class="summary-row"><span>Feijão ×2</span><span>R$ 14,98</span></div>
+        <div class="summary-row"><span>Total</span><span>R$ 58,20</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="screen-card" class="screen">
+    <div class="panel" style="flex:1">
+      <div class="panel-header">
+        <span style="width:10px;height:10px;border-radius:50%;background:#378ADD;display:inline-block"></span>
+        <span class="panel-title">Pagamento no cartão</span>
+        <span class="panel-sub">Mercado Pago Point</span>
+      </div>
+      <div class="panel-body">
+        <div id="card-step-1">
+          <div class="status-badge status-waiting" style="background:#0e1f35;color:#378ADD">
+            <div class="pulse" style="background:#378ADD;animation:blink 1.2s infinite"></div>
+            Enviando valor para a maquininha...
+          </div>
+          <div class="card-machine">
+            <div class="machine-screen">
+              <div class="machine-label">Total a cobrar</div>
+              <div class="machine-val">R$ 58,20</div>
+              <div class="machine-hint">Aguardando o cliente...</div>
+            </div>
+            <div style="font-size:12px;color:#6b6a65">Point Smart · conectada via API</div>
+          </div>
+          <div class="step-nav">
+            <button class="step-btn" onclick="cardBack()">← Voltar</button>
+            <button class="step-btn go" onclick="cardNext()">Simular aprovação →</button>
+          </div>
+          <div class="step-dots">
+            <div class="step-dot active" id="cd1"></div>
+            <div class="step-dot" id="cd2"></div>
+            <div class="step-dot" id="cd3"></div>
+          </div>
+        </div>
+        <div id="card-step-2" style="display:none">
+          <div class="status-badge" style="background:#0e1f35;color:#378ADD">
+            <div class="pulse" style="background:#378ADD;animation:blink 1.2s infinite"></div>
+            Cliente inserindo/aproximando cartão...
+          </div>
+          <div class="card-machine">
+            <div class="machine-screen">
+              <div class="machine-label">Insira ou aproxime</div>
+              <div class="machine-val" style="font-size:16px;padding:8px 0">💳 → □</div>
+              <div class="machine-hint">Aguardando leitura do cartão</div>
+            </div>
+          </div>
+          <div class="step-nav">
+            <button class="step-btn" onclick="cardPrev()">← Voltar</button>
+            <button class="step-btn go" onclick="cardApprove()">Simular aprovação →</button>
+          </div>
+          <div class="step-dots">
+            <div class="step-dot" id="cd1b"></div>
+            <div class="step-dot active" id="cd2b"></div>
+            <div class="step-dot" id="cd3b"></div>
+          </div>
+        </div>
+        <div id="card-step-3" style="display:none;text-align:center;padding:12px 0">
+          <div class="status-badge status-success" style="justify-content:center">
+            <div class="pulse pulse-green"></div>
+            Pagamento aprovado — venda concluída!
+          </div>
+          <div style="font-size:13px;color:#6b6a65;margin-top:12px">Recibo impresso automaticamente.</div>
+          <div class="step-dots" style="margin-top:12px">
+            <div class="step-dot" id="cd1c"></div>
+            <div class="step-dot" id="cd2c"></div>
+            <div class="step-dot active" id="cd3c"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="summary panel">
+      <div class="panel-header"><span class="panel-title">Resumo</span></div>
+      <div class="panel-body">
+        <div class="summary-row"><span>Tomate 1,350kg</span><span>R$ 9,32</span></div>
+        <div class="summary-row"><span>Leite Integral ×2</span><span>R$ 9,00</span></div>
+        <div class="summary-row"><span>Arroz 5kg</span><span>R$ 24,90</span></div>
+        <div class="summary-row"><span>Feijão ×2</span><span>R$ 14,98</span></div>
+        <div class="summary-row"><span>Total</span><span>R$ 58,20</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function makeQR(el, dark) {
+  const pat = dark
+    ? [1,1,1,1,1,1,1,0,1,0, 1,0,0,0,0,0,1,0,0,1, 1,0,1,1,1,0,1,0,1,0, 1,0,1,1,1,0,1,0,0,0, 1,0,1,1,1,0,1,0,1,1, 1,0,0,0,0,0,1,0,1,0, 1,1,1,1,1,1,1,0,1,0, 0,0,0,0,0,0,0,0,1,1, 0,1,1,0,1,0,1,1,0,1, 1,0,1,0,0,1,0,1,1,0]
+    : [1,1,1,1,1,1,1,0,0,1, 1,0,0,0,0,0,1,0,1,0, 1,0,1,1,1,0,1,0,0,1, 1,0,1,1,1,0,1,0,1,1, 1,0,1,1,1,0,1,0,0,0, 1,0,0,0,0,0,1,0,1,1, 1,1,1,1,1,1,1,0,0,1, 0,0,0,0,0,0,0,0,0,0, 1,0,1,1,0,1,1,0,1,0, 0,1,0,1,1,0,0,1,0,1];
+  el.innerHTML = '';
+  pat.forEach(v => {
+    const c = document.createElement('div');
+    c.className = 'qr-c';
+    c.style.background = v ? (dark ? '#e8e6df' : '#111318') : 'transparent';
+    el.appendChild(c);
+  });
+}
+
+makeQR(document.getElementById('qr-dynamic'), false);
+makeQR(document.getElementById('qr-static'), false);
+
+function showTab(t) {
+  document.querySelectorAll('.tab').forEach((el,i) => el.classList.toggle('active', ['cash','pix','card'][i]===t));
+  document.querySelectorAll('.screen').forEach(el => el.classList.remove('active'));
+  document.getElementById('screen-'+t).classList.add('active');
+}
+
+function calcChange() {
+  const total = 58.20;
+  const received = parseFloat(document.getElementById('cash-input').value) || 0;
+  const change = received - total;
+  const el = document.getElementById('change-val');
+  const btn = document.getElementById('cash-confirm');
+  if (change >= 0) {
+    el.textContent = 'R$ ' + change.toFixed(2).replace('.',',');
+    el.style.color = '#1D9E75';
+    btn.disabled = false;
+  } else {
+    el.textContent = '− R$ ' + Math.abs(change).toFixed(2).replace('.',',');
+    el.style.color = '#E24B4A';
+    btn.disabled = true;
+  }
+}
+
+function cashStep() {
+  const btn = document.getElementById('cash-confirm');
+  btn.textContent = 'Venda concluída — recibo impresso!';
+  btn.style.background = '#085041';
+  btn.style.color = '#1D9E75';
+  btn.onclick = null;
+}
+
+let offline = false;
+function toggleOffline() {
+  offline = !offline;
+  const t = document.getElementById('offline-toggle');
+  t.classList.toggle('on', offline);
+  document.getElementById('pix-online').style.display = offline ? 'none' : 'block';
+  document.getElementById('pix-offline').style.display = offline ? 'block' : 'none';
+}
+
+function pixConfirm() {
+  document.getElementById('pix-waiting').style.display = 'none';
+  document.getElementById('pix-done').style.display = 'block';
+}
+
+function pixOfflineConfirm() {
+  document.getElementById('pix-offline').innerHTML =
+    '<div class="status-badge status-success" style="justify-content:center"><div class="pulse pulse-green"></div>PIX confirmado — venda concluída!</div>' +
+    '<div style="font-size:13px;color:#6b6a65;margin-top:12px;text-align:center">QR code impresso no recibo do cliente.</div>';
+}
+
+function cardNext() {
+  document.getElementById('card-step-1').style.display = 'none';
+  document.getElementById('card-step-2').style.display = 'block';
+}
+function cardPrev() {
+  document.getElementById('card-step-2').style.display = 'none';
+  document.getElementById('card-step-1').style.display = 'block';
+}
+function cardBack() {
+  document.getElementById('card-step-1').style.display = 'none';
+  showTab('cash');
+}
+function cardApprove() {
+  document.getElementById('card-step-2').style.display = 'none';
+  document.getElementById('card-step-3').style.display = 'block';
+}
+
+calcChange();
+</script>
