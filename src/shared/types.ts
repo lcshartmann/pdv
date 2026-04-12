@@ -100,6 +100,11 @@ export interface ProductUpdateRequest {
   category_id?: number;
 }
 
+export interface ProductReceiveStockRequest {
+  product_id: number;
+  quantity: number;
+}
+
 export interface PaymentCreateRequest {
   sale_id: number;
   method: PaymentMethod;
@@ -131,6 +136,7 @@ export interface RendererApi {
   categoryList: () => Promise<Category[]>;
   productCreate: (payload: ProductCreateRequest) => Promise<ProductCreateResponse>;
   productUpdate: (payload: ProductUpdateRequest) => Promise<void>;
+  productReceiveStock: (payload: ProductReceiveStockRequest) => Promise<void>;
   paymentCreate: (payload: PaymentCreateRequest) => Promise<PaymentCreateResponse>;
   scaleGetStatus: () => Promise<ScaleStatus>;
   scaleReadStableWeight: () => Promise<number>;

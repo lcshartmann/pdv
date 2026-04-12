@@ -7,6 +7,7 @@ import type {
   Product,
   ProductCreateRequest,
   ProductCreateResponse,
+  ProductReceiveStockRequest,
   ProductUpdateRequest,
   SaleAddItemRequest,
   SaleAddItemResponse,
@@ -244,6 +245,35 @@ export function registerIpcHandlers(db: Database.Database, services: IpcServices
       payload.category_id ?? null,
       payload.id
     );
+  });
+
+  ipcMain.handle("product:receiveStock", (_event, payload: ProductReceiveStockRequest) => {
+    const quantity = Number(payload.quantity);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      throw new Error("Quantidade de entrada deve ser maior que zero.");
+    }
+
+    const tx = db.transaction(() => {
+      const product = db
+        .prepare("SELECT id FROM product WHERE id = ?")
+        .get(payload.product_id) as { id: number } | undefined;
+
+      if (!product) {
+        throw new Error("Produto não encontrado.");
+      }
+
+      db.prepare("UPDATE product SET stock_qty = stock_qty + ?, updated_at = datetime('now') WHERE id = ?").run(
+        quantity,
+        payload.product_id
+      );
+      db.prepare("INSERT INTO stock_movement (product_id, type, qty_change, reason) VALUES (?, 'restock', ?, ?)").run(
+        payload.product_id,
+        quantity,
+        "catalog:manual_restock"
+      );
+    });
+
+    tx();
   });
 
   ipcMain.handle("payment:create", (_event, payload: PaymentCreateRequest) => {

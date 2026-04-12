@@ -12,6 +12,7 @@ const api: RendererApi = {
   categoryList: () => ipcRenderer.invoke("category:list"),
   productCreate: (payload) => ipcRenderer.invoke("product:create", payload),
   productUpdate: (payload) => ipcRenderer.invoke("product:update", payload),
+  productReceiveStock: (payload) => ipcRenderer.invoke("product:receiveStock", payload),
   paymentCreate: (payload) => ipcRenderer.invoke("payment:create", payload),
   scaleGetStatus: () => ipcRenderer.invoke("scale:getStatus"),
   scaleReadStableWeight: () => ipcRenderer.invoke("scale:readStableWeight")
