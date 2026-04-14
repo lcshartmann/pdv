@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import type { Product, SaleItem, SaleStatus } from "../../shared/types";
+import ScrollArea from "../components/ScrollArea";
+import { uiStoreActions, useUiStore } from "../store/uiStore";
+import type { Product, SaleItem } from "../../shared/types";
 
 interface SaleLine {
   saleItemId: number;
@@ -70,9 +72,7 @@ function createLine(item: SaleItem, product: Product): SaleLine {
 }
 
 export default function SalePage(): JSX.Element {
-  const [saleId, setSaleId] = useState<number | null>(null);
-  const [saleStatus, setSaleStatus] = useState<SaleStatus>("open");
-  const [saleLines, setSaleLines] = useState<SaleLine[]>([]);
+  const { saleId, saleStatus, saleLines } = useUiStore((current) => current.saleSession);
   const [products, setProducts] = useState<Product[]>([]);
   const [search, setSearch] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -142,8 +142,8 @@ export default function SalePage(): JSX.Element {
     startingSaleRef.current = true;
     setIsStartingSale(true);
     setErrorMessage(null);
-    setSaleStatus("open");
-    setSaleLines([]);
+    uiStoreActions.setSaleStatus("open");
+    uiStoreActions.setSaleLines([]);
     setSearch("");
     setUnitModal({ open: false, product: null, quantity: "1" });
     setWeightModal({ open: false, product: null, weight: "", loading: false, scaleError: null });
@@ -154,7 +154,7 @@ export default function SalePage(): JSX.Element {
 
     try {
       const saleResponse = await window.api.saleCreate();
-      setSaleId(saleResponse.saleId);
+      uiStoreActions.setSaleId(saleResponse.saleId);
       searchInputRef.current?.focus();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Falha ao iniciar nova venda.");
@@ -173,14 +173,16 @@ export default function SalePage(): JSX.Element {
     const bootstrap = async (): Promise<void> => {
       try {
         await loadProducts();
-        await startNewSale({ force: true });
+        if (!saleId) {
+          await startNewSale({ force: true });
+        }
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "Falha ao carregar tela de venda.");
       }
     };
 
     void bootstrap();
-  }, [loadProducts, startNewSale]);
+  }, [loadProducts, saleId, startNewSale]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 1000);
@@ -256,7 +258,7 @@ export default function SalePage(): JSX.Element {
         status: "confirmed"
       });
       await window.api.saleComplete({ saleId });
-      setSaleStatus("completed");
+      uiStoreActions.setSaleStatus("completed");
       setCashModal({ open: false, amountReceived: "", error: null });
     } catch (error) {
       setCashModal({
@@ -269,10 +271,52 @@ export default function SalePage(): JSX.Element {
     }
   }, [cashModal.amountReceived, saleId, saleStatus, subtotal]);
 
+  const closeOpenModal = useCallback((): boolean => {
+    if (cashModal.open) {
+      setCashModal({ open: false, amountReceived: "", error: null });
+      return true;
+    }
+
+    if (unitModal.open) {
+      setUnitModal({ open: false, product: null, quantity: "1" });
+      return true;
+    }
+
+    if (editModal.open) {
+      setEditModal({ open: false, line: null, quantity: "" });
+      setEditModalError(null);
+      return true;
+    }
+
+    if (weightModal.open) {
+      setWeightModal({ open: false, product: null, weight: "", loading: false, scaleError: null });
+      return true;
+    }
+
+    if (cancelModal.open) {
+      setCancelModal({ open: false, error: null });
+      return true;
+    }
+
+    return false;
+  }, [cancelModal.open, cashModal.open, editModal.open, unitModal.open, weightModal.open]);
+
+  const hasOpenModal = cashModal.open || unitModal.open || editModal.open || weightModal.open || cancelModal.open;
+
+  useEffect(() => {
+    document.body.dataset.posModalOpen = hasOpenModal ? "true" : "false";
+    return () => {
+      delete document.body.dataset.posModalOpen;
+    };
+  }, [hasOpenModal]);
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key === "F1") {
         event.preventDefault();
+        if (hasOpenModal) {
+          return;
+        }
         void startNewSale();
       }
 
@@ -286,15 +330,21 @@ export default function SalePage(): JSX.Element {
         openCashModal();
       }
 
-      if (event.key === "Escape" && saleStatus === "open" && saleId && !cancelModal.open) {
+      if (event.key === "Escape") {
         event.preventDefault();
-        setCancelModal({ open: true, error: null });
+        if (closeOpenModal()) {
+          return;
+        }
+
+        if (saleStatus === "open" && saleId) {
+          setCancelModal({ open: true, error: null });
+        }
       }
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [cancelModal.open, openCashModal, saleId, saleStatus, startNewSale]);
+  }, [closeOpenModal, hasOpenModal, openCashModal, saleId, saleStatus, startNewSale]);
 
   const persistAddedItem = useCallback(
     async (product: Product, quantity: number): Promise<void> => {
@@ -310,16 +360,7 @@ export default function SalePage(): JSX.Element {
         const { item } = await window.api.saleAddItem({ saleId, productId: product.id, quantity });
         const line = createLine(item, product);
 
-        setSaleLines((current) => {
-          const index = current.findIndex((entry) => entry.saleItemId === line.saleItemId);
-          if (index === -1) {
-            return [...current, line];
-          }
-
-          const updated = [...current];
-          updated[index] = line;
-          return updated;
-        });
+        uiStoreActions.upsertSaleLine(line);
 
         setSearch("");
         searchInputRef.current?.focus();
@@ -457,7 +498,7 @@ export default function SalePage(): JSX.Element {
       }
 
       const line = createLine(item, product);
-      setSaleLines((current) => current.map((entry) => (entry.saleItemId === line.saleItemId ? line : entry)));
+      uiStoreActions.upsertSaleLine(line);
       setEditModal({ open: false, line: null, quantity: "" });
       setEditModalError(null);
     } catch (error) {
@@ -477,7 +518,7 @@ export default function SalePage(): JSX.Element {
       setErrorMessage(null);
       try {
         await window.api.saleRemoveItem({ saleId, saleItemId: line.saleItemId });
-        setSaleLines((current) => current.filter((entry) => entry.saleItemId !== line.saleItemId));
+        uiStoreActions.removeSaleLine(line.saleItemId);
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "Falha ao remover item.");
       } finally {
@@ -505,8 +546,8 @@ export default function SalePage(): JSX.Element {
     setErrorMessage(null);
     try {
       await window.api.saleCancel({ saleId });
-      setSaleStatus("cancelled");
-      setSaleLines([]);
+      uiStoreActions.setSaleStatus("cancelled");
+      uiStoreActions.setSaleLines([]);
       setSearch("");
       setUnitModal({ open: false, product: null, quantity: "1" });
       setWeightModal({ open: false, product: null, weight: "", loading: false, scaleError: null });
@@ -591,7 +632,7 @@ export default function SalePage(): JSX.Element {
             <span />
           </div>
 
-          <div className="min-h-0 overflow-y-auto">
+          <ScrollArea className="min-h-0 overflow-y-auto">
             {saleLines.length === 0 ? (
               <div className="px-4 py-8 text-sm text-[#7f807c]">Venda aberta. Pesquise um produto para adicionar.</div>
             ) : (
@@ -623,7 +664,7 @@ export default function SalePage(): JSX.Element {
                 </div>
               ))
             )}
-          </div>
+          </ScrollArea>
 
           <footer className="flex items-center justify-between border-t border-[#2a2d35] bg-[#1a1d24] px-4 py-2 text-sm">
             <p className="text-[#7f807c]">
