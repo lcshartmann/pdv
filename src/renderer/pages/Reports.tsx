@@ -405,12 +405,7 @@ export default function ReportsPage(): JSX.Element {
 
             <section className="overflow-hidden rounded-xl border border-[#2a2d35] bg-[#1a1d24]">
               <div className="flex items-center justify-between border-b border-[#2a2d35] px-4 py-3">
-                <div>
-                  <h2 className="text-[13px] font-medium">Top 10 produtos mais vendidos</h2>
-                  <p className="text-[11px] text-[#6b6a65]">
-                    {topMode === "revenue" ? "Ranking por receita (R$)" : "Ranking por quantidade vendida (un/kg)"}
-                  </p>
-                </div>
+                <h2 className="text-[13px] font-medium">Produtos mais vendidos</h2>
                 <div className="flex gap-1">
                   <button
                     onClick={() => setTopMode("revenue")}
@@ -436,7 +431,7 @@ export default function ReportsPage(): JSX.Element {
                   </button>
                 </div>
               </div>
-              <ScrollArea className="max-h-64 overflow-y-auto p-4">
+              <ScrollArea className="min-h-44 overflow-y-auto p-4">
                 {topProducts.length ? (
                   <div className="flex flex-col gap-2">
                     {topProducts.map((entry, index) => {
