@@ -10,6 +10,12 @@ function KeyboardPageNavigation(): null {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
+      const hasOpenModal = document.body.dataset.posModalOpen === "true";
+      if (hasOpenModal && (event.key === "F1" || event.key === "F6" || event.key === "F7")) {
+        event.preventDefault();
+        return;
+      }
+
       if (event.key === "F1" && location.pathname !== "/") {
         event.preventDefault();
         navigate("/");
