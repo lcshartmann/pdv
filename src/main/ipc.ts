@@ -5,9 +5,20 @@ import type {
   PaymentCreateRequest,
   PaymentCreateResponse,
   Product,
+  ReportsDashboardRequest,
+  ReportsDashboardResponse,
+  ReportsDailyPoint,
+  ReportsHistoryItem,
+  ReportsPaymentBreakdownItem,
+  ReportsSaleDetailItem,
+  ReportsSaleDetailResponse,
+  ReportsProductOption,
+  ReportsProductSeries,
+  ReportsProductSeriesPoint,
+  ReportsStockAlertItem,
+  ReportsTopProduct,
   ProductCreateRequest,
   ProductCreateResponse,
-  ProductReceiveStockRequest,
   ProductUpdateRequest,
   SaleAddItemRequest,
   SaleAddItemResponse,
@@ -247,33 +258,342 @@ export function registerIpcHandlers(db: Database.Database, services: IpcServices
     );
   });
 
-  ipcMain.handle("product:receiveStock", (_event, payload: ProductReceiveStockRequest) => {
-    const quantity = Number(payload.quantity);
-    if (!Number.isFinite(quantity) || quantity <= 0) {
-      throw new Error("Quantidade de entrada deve ser maior que zero.");
+  ipcMain.handle("reports:dashboard", (_event, payload: ReportsDashboardRequest) => {
+    const fromDate = payload.fromDate;
+    const toDate = payload.toDate;
+
+    const summary = db
+      .prepare(
+        `
+        SELECT
+          COUNT(*) AS total_sales,
+          COALESCE(SUM(total), 0) AS total_revenue
+        FROM sale
+        WHERE status = 'completed'
+          AND DATE(completed_at) BETWEEN DATE(?) AND DATE(?)
+        `
+      )
+      .get(fromDate, toDate) as { total_sales: number; total_revenue: number };
+
+    const totalSales = Number(summary.total_sales ?? 0);
+    const totalRevenue = Number(summary.total_revenue ?? 0);
+    const averageTicket = totalSales > 0 ? totalRevenue / totalSales : 0;
+
+    const daily = db
+      .prepare(
+        `
+        SELECT
+          DATE(completed_at) AS date,
+          COALESCE(SUM(total), 0) AS revenue,
+          COUNT(*) AS sales_count
+        FROM sale
+        WHERE status = 'completed'
+          AND DATE(completed_at) BETWEEN DATE(?) AND DATE(?)
+        GROUP BY DATE(completed_at)
+        ORDER BY DATE(completed_at) ASC
+        `
+      )
+      .all(fromDate, toDate) as ReportsDailyPoint[];
+
+    const topProductsByRevenue = db
+      .prepare(
+        `
+        SELECT
+          p.id AS product_id,
+          p.name AS product_name,
+          p.unit_type AS unit_type,
+          COALESCE(SUM(si.total), 0) AS revenue,
+          COALESCE(SUM(si.quantity), 0) AS quantity
+        FROM sale_item si
+        JOIN sale s ON s.id = si.sale_id
+        JOIN product p ON p.id = si.product_id
+        WHERE s.status = 'completed'
+          AND DATE(s.completed_at) BETWEEN DATE(?) AND DATE(?)
+        GROUP BY p.id, p.name, p.unit_type
+        ORDER BY revenue DESC
+        LIMIT 10
+        `
+      )
+      .all(fromDate, toDate) as ReportsTopProduct[];
+
+    const topProductsByQuantity = db
+      .prepare(
+        `
+        SELECT
+          p.id AS product_id,
+          p.name AS product_name,
+          p.unit_type AS unit_type,
+          COALESCE(SUM(si.total), 0) AS revenue,
+          COALESCE(SUM(si.quantity), 0) AS quantity
+        FROM sale_item si
+        JOIN sale s ON s.id = si.sale_id
+        JOIN product p ON p.id = si.product_id
+        WHERE s.status = 'completed'
+          AND DATE(s.completed_at) BETWEEN DATE(?) AND DATE(?)
+        GROUP BY p.id, p.name, p.unit_type
+        ORDER BY quantity DESC
+        LIMIT 10
+        `
+      )
+      .all(fromDate, toDate) as ReportsTopProduct[];
+
+    const paymentRows = db
+      .prepare(
+        `
+        SELECT
+          payment.method AS method,
+          COUNT(*) AS sales_count,
+          COALESCE(SUM(payment.amount), 0) AS revenue
+        FROM payment
+        JOIN sale ON sale.id = payment.sale_id
+        WHERE sale.status = 'completed'
+          AND DATE(sale.completed_at) BETWEEN DATE(?) AND DATE(?)
+        GROUP BY payment.method
+        `
+      )
+      .all(fromDate, toDate) as Array<{ method: "cash" | "pix" | "card"; sales_count: number; revenue: number }>;
+
+    const paymentByMethod = new Map(paymentRows.map((row) => [row.method, row]));
+    const paymentBreakdown = (["cash", "pix", "card"] as const).map((method) => {
+      const row = paymentByMethod.get(method);
+      const revenue = Number(row?.revenue ?? 0);
+      return {
+        method,
+        sales_count: Number(row?.sales_count ?? 0),
+        revenue,
+        percent: totalRevenue > 0 ? (revenue / totalRevenue) * 100 : 0
+      };
+    }) satisfies ReportsPaymentBreakdownItem[];
+
+    const history = db
+      .prepare(
+        `
+        SELECT
+          sale.id AS sale_id,
+          COALESCE(sale.completed_at, sale.started_at) AS event_at,
+          sale.total AS total,
+          payment.method AS payment_method,
+          sale.status AS status
+        FROM sale
+        LEFT JOIN payment ON payment.sale_id = sale.id
+        WHERE DATE(COALESCE(sale.completed_at, sale.started_at)) BETWEEN DATE(?) AND DATE(?)
+        ORDER BY COALESCE(sale.completed_at, sale.started_at) DESC
+        LIMIT 50
+        `
+      )
+      .all(fromDate, toDate) as ReportsHistoryItem[];
+
+    const stockAlerts = db
+      .prepare(
+        `
+        SELECT
+          p.id AS product_id,
+          p.name AS product_name,
+          p.unit_type AS unit_type,
+          p.stock_qty AS stock_qty,
+          p.stock_alert_qty AS stock_alert_qty,
+          CASE WHEN p.stock_qty = 0 THEN 'out' ELSE 'low' END AS status
+        FROM product p
+        WHERE p.stock_qty <= p.stock_alert_qty
+        ORDER BY status ASC, p.stock_qty ASC, p.name ASC
+        LIMIT 10
+        `
+      )
+      .all() as ReportsStockAlertItem[];
+
+    const productOptions = db
+      .prepare(
+        `
+        SELECT
+          p.id AS id,
+          p.name AS name,
+          p.unit_type AS unit_type
+        FROM product p
+        ORDER BY p.name ASC
+        `
+      )
+      .all() as ReportsProductOption[];
+
+    const selectedProductId = payload.productId ?? productOptions[0]?.id;
+    let productSeries: ReportsProductSeries | null = null;
+
+    if (selectedProductId) {
+      const productMeta = db
+        .prepare("SELECT id, name, unit_type FROM product WHERE id = ?")
+        .get(selectedProductId) as { id: number; name: string; unit_type: "unit" | "kg" } | undefined;
+
+      if (productMeta) {
+        // Determine if we should use hourly granularity (for periods up to 2 days)
+        const fromDateTime = new Date(`${fromDate}T00:00:00`);
+        const toDateTime = new Date(`${toDate}T23:59:59`);
+        const daysDiff = (toDateTime.getTime() - fromDateTime.getTime()) / (1000 * 60 * 60 * 24);
+        const useHourly = daysDiff <= 2;
+
+        let points: ReportsProductSeriesPoint[] = [];
+
+        if (useHourly) {
+          // Query hourly data
+          const hourlyPoints = db
+            .prepare(
+              `
+              SELECT
+                DATE(s.completed_at) AS date,
+                CAST(STRFTIME('%H', s.completed_at) AS INTEGER) AS hour,
+                COALESCE(SUM(si.quantity), 0) AS quantity,
+                COALESCE(SUM(si.total), 0) AS revenue
+              FROM sale_item si
+              JOIN sale s ON s.id = si.sale_id
+              WHERE s.status = 'completed'
+                AND si.product_id = ?
+                AND DATE(s.completed_at) BETWEEN DATE(?) AND DATE(?)
+              GROUP BY DATE(s.completed_at), CAST(STRFTIME('%H', s.completed_at) AS INTEGER)
+              ORDER BY DATE(s.completed_at) ASC, CAST(STRFTIME('%H', s.completed_at) AS INTEGER) ASC
+              `
+            )
+            .all(selectedProductId, fromDate, toDate) as Array<{
+              date: string;
+              hour: number;
+              quantity: number;
+              revenue: number;
+            }>;
+          points = hourlyPoints.map((p) => ({
+            date: p.date,
+            hour: p.hour,
+            quantity: Number(p.quantity),
+            revenue: Number(p.revenue)
+          }));
+        } else {
+          // Query daily data
+          const dailyPoints = db
+            .prepare(
+              `
+              SELECT
+                DATE(s.completed_at) AS date,
+                COALESCE(SUM(si.quantity), 0) AS quantity,
+                COALESCE(SUM(si.total), 0) AS revenue
+              FROM sale_item si
+              JOIN sale s ON s.id = si.sale_id
+              WHERE s.status = 'completed'
+                AND si.product_id = ?
+                AND DATE(s.completed_at) BETWEEN DATE(?) AND DATE(?)
+              GROUP BY DATE(s.completed_at)
+              ORDER BY DATE(s.completed_at) ASC
+              `
+            )
+            .all(selectedProductId, fromDate, toDate) as Array<{
+              date: string;
+              quantity: number;
+              revenue: number;
+            }>;
+          points = dailyPoints.map((p) => ({
+            date: p.date,
+            quantity: Number(p.quantity),
+            revenue: Number(p.revenue)
+          }));
+        }
+
+        const totals = db
+          .prepare(
+            `
+            SELECT
+              COALESCE(SUM(si.quantity), 0) AS total_quantity,
+              COALESCE(SUM(si.total), 0) AS total_revenue
+            FROM sale_item si
+            JOIN sale s ON s.id = si.sale_id
+            WHERE s.status = 'completed'
+              AND si.product_id = ?
+              AND DATE(s.completed_at) BETWEEN DATE(?) AND DATE(?)
+            `
+          )
+          .get(selectedProductId, fromDate, toDate) as { total_quantity: number; total_revenue: number };
+
+        productSeries = {
+          product_id: productMeta.id,
+          product_name: productMeta.name,
+          unit_type: productMeta.unit_type,
+          total_quantity: Number(totals.total_quantity ?? 0),
+          total_revenue: Number(totals.total_revenue ?? 0),
+          points
+        };
+      }
     }
 
-    const tx = db.transaction(() => {
-      const product = db
-        .prepare("SELECT id FROM product WHERE id = ?")
-        .get(payload.product_id) as { id: number } | undefined;
+    return {
+      total_sales: totalSales,
+      total_revenue: totalRevenue,
+      average_ticket: averageTicket,
+      daily,
+      top_products_by_revenue: topProductsByRevenue,
+      top_products_by_quantity: topProductsByQuantity,
+      payment_breakdown: paymentBreakdown,
+      history,
+      stock_alerts: stockAlerts,
+      product_options: productOptions,
+      product_series: productSeries
+    } satisfies ReportsDashboardResponse;
+  });
 
-      if (!product) {
-        throw new Error("Produto não encontrado.");
-      }
+  ipcMain.handle("reports:saleDetail", (_event, payload: { saleId: number }) => {
+    const sale = db
+      .prepare(
+        `
+        SELECT
+          sale.id AS sale_id,
+          sale.status AS status,
+          sale.started_at AS started_at,
+          sale.completed_at AS completed_at,
+          sale.subtotal AS subtotal,
+          sale.discount_amount AS discount_amount,
+          sale.total AS total,
+          payment.method AS payment_method,
+          payment.amount AS payment_amount,
+          payment.change_amount AS payment_change_amount,
+          payment.status AS payment_status,
+          payment.paid_at AS paid_at
+        FROM sale
+        LEFT JOIN payment ON payment.sale_id = sale.id
+        WHERE sale.id = ?
+        LIMIT 1
+        `
+      )
+      .get(payload.saleId) as Omit<ReportsSaleDetailResponse, "items"> | undefined;
 
-      db.prepare("UPDATE product SET stock_qty = stock_qty + ?, updated_at = datetime('now') WHERE id = ?").run(
-        quantity,
-        payload.product_id
-      );
-      db.prepare("INSERT INTO stock_movement (product_id, type, qty_change, reason) VALUES (?, 'restock', ?, ?)").run(
-        payload.product_id,
-        quantity,
-        "catalog:manual_restock"
-      );
-    });
+    if (!sale) {
+      throw new Error("Venda não encontrada.");
+    }
 
-    tx();
+    const items = db
+      .prepare(
+        `
+        SELECT
+          sale_item.id AS sale_item_id,
+          sale_item.product_id AS product_id,
+          product.name AS product_name,
+          product.unit_type AS unit_type,
+          sale_item.quantity AS quantity,
+          sale_item.unit_price AS unit_price,
+          sale_item.discount_amount AS discount_amount,
+          sale_item.total AS total
+        FROM sale_item
+        JOIN product ON product.id = sale_item.product_id
+        WHERE sale_item.sale_id = ?
+        ORDER BY sale_item.id ASC
+        `
+      )
+      .all(payload.saleId) as ReportsSaleDetailItem[];
+
+    return {
+      ...sale,
+      items
+    } satisfies ReportsSaleDetailResponse;
+  });
+
+  ipcMain.handle("reports:reprintReceipt", async (_event, payload: { saleId: number }) => {
+    const exists = db.prepare("SELECT id FROM sale WHERE id = ? LIMIT 1").get(payload.saleId) as { id: number } | undefined;
+    if (!exists) {
+      throw new Error("Venda não encontrada para reimpressão.");
+    }
+    await services.printerService.printReceipt(payload.saleId);
   });
 
   ipcMain.handle("payment:create", (_event, payload: PaymentCreateRequest) => {
