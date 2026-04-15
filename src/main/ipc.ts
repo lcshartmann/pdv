@@ -279,21 +279,61 @@ export function registerIpcHandlers(db: Database.Database, services: IpcServices
     const totalRevenue = Number(summary.total_revenue ?? 0);
     const averageTicket = totalSales > 0 ? totalRevenue / totalSales : 0;
 
-    const daily = db
-      .prepare(
-        `
-        SELECT
-          DATE(completed_at) AS date,
-          COALESCE(SUM(total), 0) AS revenue,
-          COUNT(*) AS sales_count
-        FROM sale
-        WHERE status = 'completed'
-          AND DATE(completed_at) BETWEEN DATE(?) AND DATE(?)
-        GROUP BY DATE(completed_at)
-        ORDER BY DATE(completed_at) ASC
-        `
-      )
-      .all(fromDate, toDate) as ReportsDailyPoint[];
+    // Determine if we should use hourly granularity (for periods up to 2 days)
+    const fromDateTime = new Date(`${fromDate}T00:00:00`);
+    const toDateTime = new Date(`${toDate}T23:59:59`);
+    const daysDiff = (toDateTime.getTime() - fromDateTime.getTime()) / (1000 * 60 * 60 * 24);
+    const useHourly = daysDiff <= 2;
+
+    let daily: ReportsDailyPoint[] = [];
+
+    if (useHourly) {
+      // Query data in 2-hour periods for the daily revenue chart
+      const hourlyPoints = db
+        .prepare(
+          `
+          SELECT
+            DATE(completed_at) AS date,
+            CAST(STRFTIME('%H', completed_at) AS INTEGER) / 2 AS hour,
+            COALESCE(SUM(total), 0) AS revenue,
+            COUNT(*) AS sales_count
+          FROM sale
+          WHERE status = 'completed'
+            AND DATE(completed_at) BETWEEN DATE(?) AND DATE(?)
+          GROUP BY DATE(completed_at), CAST(STRFTIME('%H', completed_at) AS INTEGER) / 2
+          ORDER BY DATE(completed_at) ASC, CAST(STRFTIME('%H', completed_at) AS INTEGER) / 2 ASC
+          `
+        )
+        .all(fromDate, toDate) as Array<{
+          date: string;
+          hour: number;
+          revenue: number;
+          sales_count: number;
+        }>;
+      daily = hourlyPoints.map((p) => ({
+        date: p.date,
+        hour: p.hour,
+        revenue: Number(p.revenue),
+        sales_count: Number(p.sales_count)
+      }));
+    } else {
+      // Query daily data
+      daily = db
+        .prepare(
+          `
+          SELECT
+            DATE(completed_at) AS date,
+            COALESCE(SUM(total), 0) AS revenue,
+            COUNT(*) AS sales_count
+          FROM sale
+          WHERE status = 'completed'
+            AND DATE(completed_at) BETWEEN DATE(?) AND DATE(?)
+          GROUP BY DATE(completed_at)
+          ORDER BY DATE(completed_at) ASC
+          `
+        )
+        .all(fromDate, toDate) as ReportsDailyPoint[];
+    }
 
     const topProductsByRevenue = db
       .prepare(
@@ -432,13 +472,13 @@ export function registerIpcHandlers(db: Database.Database, services: IpcServices
         let points: ReportsProductSeriesPoint[] = [];
 
         if (useHourly) {
-          // Query hourly data
+          // Query data in 2-hour periods
           const hourlyPoints = db
             .prepare(
               `
               SELECT
                 DATE(s.completed_at) AS date,
-                CAST(STRFTIME('%H', s.completed_at) AS INTEGER) AS hour,
+                CAST(STRFTIME('%H', s.completed_at) AS INTEGER) / 2 AS hour,
                 COALESCE(SUM(si.quantity), 0) AS quantity,
                 COALESCE(SUM(si.total), 0) AS revenue
               FROM sale_item si
@@ -446,8 +486,8 @@ export function registerIpcHandlers(db: Database.Database, services: IpcServices
               WHERE s.status = 'completed'
                 AND si.product_id = ?
                 AND DATE(s.completed_at) BETWEEN DATE(?) AND DATE(?)
-              GROUP BY DATE(s.completed_at), CAST(STRFTIME('%H', s.completed_at) AS INTEGER)
-              ORDER BY DATE(s.completed_at) ASC, CAST(STRFTIME('%H', s.completed_at) AS INTEGER) ASC
+              GROUP BY DATE(s.completed_at), CAST(STRFTIME('%H', s.completed_at) AS INTEGER) / 2
+              ORDER BY DATE(s.completed_at) ASC, CAST(STRFTIME('%H', s.completed_at) AS INTEGER) / 2 ASC
               `
             )
             .all(selectedProductId, fromDate, toDate) as Array<{

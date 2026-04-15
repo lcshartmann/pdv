@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Line } from "react-chartjs-2";
+import { Line, Bar } from "react-chartjs-2";
 import {
   Chart as ChartJS,
   CategoryScale,
   LinearScale,
   PointElement,
   LineElement,
+  BarElement,
   Title,
   Tooltip,
   Legend,
@@ -15,7 +16,7 @@ import {
 import ScrollArea from "../components/ScrollArea";
 import type { PaymentMethod, ReportsDashboardResponse, ReportsSaleDetailResponse } from "../../shared/types";
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler);
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, Filler);
 
 type Preset = "today" | "7d" | "15d" | "30d" | "custom";
 type TopMode = "revenue" | "quantity";
@@ -76,8 +77,10 @@ function formatDateLabel(isoDate: string): string {
     .replace(".", "");
 }
 
-function formatHourLabel(hour: number): string {
-  return `${String(hour).padStart(2, "0")}:00`;
+function formatHourLabel(periodIndex: number): string {
+  const startHour = periodIndex * 2;
+  const endHour = startHour + 2;
+  return `${String(startHour).padStart(2, "0")}:00-${String(endHour).padStart(2, "0")}:00`;
 }
 
 function formatDateTimeLabel(dateTime: string): string {
@@ -185,13 +188,6 @@ export default function ReportsPage(): JSX.Element {
     return Math.max(...topProducts.map((entry) => (topMode === "revenue" ? entry.revenue : entry.quantity)), 1);
   }, [topMode, topProducts]);
 
-  const maxDailyRevenue = useMemo(() => {
-    if (!report || report.daily.length === 0) {
-      return 1;
-    }
-    return Math.max(...report.daily.map((entry) => entry.revenue), 1);
-  }, [report]);
-
   const clockLabel = useMemo(() => {
     const time = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(now);
     const date = new Intl.DateTimeFormat("pt-BR", { weekday: "short", day: "2-digit", month: "short" }).format(now);
@@ -205,6 +201,49 @@ export default function ReportsPage(): JSX.Element {
     return { from: dateTo, to: dateFrom };
   }, [dateFrom, dateTo]);
 
+  const dailyRevenueData = useMemo((): Array<{ date: string; hour?: number; revenue: number; sales_count: number }> => {
+    if (!report?.daily) {
+      return [];
+    }
+
+    // Check if we have hourly data
+    const hasHourly = report.daily.some((p) => p.hour !== undefined);
+
+    if (hasHourly) {
+      // Return hourly data directly with all 12 periods (2-hour) filled in
+      const pointByHour = new Map(
+        report.daily.map((point) => [`${point.date}-${point.hour}`, point])
+      );
+
+      const results: Array<{ date: string; hour?: number; revenue: number; sales_count: number }> = [];
+      const days = listIsoDates(normalizedDateRange.from, normalizedDateRange.to);
+
+      for (const day of days) {
+        for (let hour = 0; hour < 12; hour++) {
+          const key = `${day}-${hour}`;
+          const point = pointByHour.get(key);
+          results.push({
+            date: day,
+            hour,
+            revenue: Number(point?.revenue ?? 0),
+            sales_count: Number(point?.sales_count ?? 0)
+          });
+        }
+      }
+
+      return results;
+    } else {
+      // Daily data - fill in missing days
+      const pointByDate = new Map(report.daily.map((point) => [point.date, point]));
+      const days = listIsoDates(normalizedDateRange.from, normalizedDateRange.to);
+      return days.map((date) => ({
+        date,
+        revenue: Number(pointByDate.get(date)?.revenue ?? 0),
+        sales_count: Number(pointByDate.get(date)?.sales_count ?? 0)
+      }));
+    }
+  }, [normalizedDateRange.from, normalizedDateRange.to, report?.daily]);
+
   const productSeriesDaily = useMemo((): Array<{ date: string; hour?: number; quantity: number; revenue: number }> => {
     if (!report?.product_series) {
       return [];
@@ -214,7 +253,7 @@ export default function ReportsPage(): JSX.Element {
     const hasHourly = report.product_series.points.some((p) => p.hour !== undefined);
 
     if (hasHourly) {
-      // Return hourly data directly with all 24 hours filled in
+      // Return hourly data directly with all 12 periods (2-hour) filled in
       const pointByHour = new Map(
         report.product_series.points.map((point) => [`${point.date}-${point.hour}`, point])
       );
@@ -223,7 +262,7 @@ export default function ReportsPage(): JSX.Element {
       const days = listIsoDates(normalizedDateRange.from, normalizedDateRange.to);
 
       for (const day of days) {
-        for (let hour = 0; hour < 24; hour++) {
+        for (let hour = 0; hour < 12; hour++) {
           const key = `${day}-${hour}`;
           const point = pointByHour.get(key);
           results.push({
@@ -369,8 +408,8 @@ export default function ReportsPage(): JSX.Element {
       <div className="flex min-h-0 flex-1">
         <ScrollArea className="min-h-0 flex-1 overflow-y-auto">
           <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
-          <div className="grid min-h-0 gap-3 md:grid-cols-2">
-            <section className="overflow-hidden rounded-xl border border-[#2a2d35] bg-[#1a1d24]">
+          <div className="grid min-h-0 gap-3 md:grid-cols-[3fr_1fr]">
+            <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[#2a2d35] bg-[#1a1d24]">
               <div className="flex items-center justify-between border-b border-[#2a2d35] px-4 py-3">
                 <h2 className="text-[13px] font-medium">Receita diária</h2>
                 <span className="text-[11px] text-[#6b6a65]">
@@ -379,28 +418,117 @@ export default function ReportsPage(): JSX.Element {
                     : `${normalizedDateRange.from} → ${normalizedDateRange.to}`}
                 </span>
               </div>
-              <ScrollArea className="max-h-64 overflow-y-auto p-4">
-                {report?.daily.length ? (
-                  <div className="flex flex-col gap-2">
-                    {report.daily.map((entry) => (
-                      <div key={entry.date} className="grid grid-cols-[84px_1fr_auto] items-center gap-2">
-                        <span className="text-[11px] text-[#6b6a65]">{formatDateLabel(entry.date)}</span>
-                        <div className="h-2 overflow-hidden rounded bg-[#22262f]">
-                          <div
-                            className="h-2 rounded bg-[#1D9E75]"
-                            style={{ width: `${Math.max((entry.revenue / maxDailyRevenue) * 100, entry.revenue > 0 ? 4 : 0)}%` }}
-                          />
-                        </div>
-                        <span className="text-[11px] text-[#c2c0b6]">
-                          {formatCurrency(entry.revenue)} · {entry.sales_count} venda{entry.sales_count !== 1 ? "s" : ""}
-                        </span>
-                      </div>
-                    ))}
+              {report?.daily.length ? (
+                <ScrollArea className="min-h-0 flex-1 overflow-x-auto p-4">
+                  <div style={{ position: "relative", width: "max(100%, 800px)", height: "100%" }}>
+                    <Bar
+                      data={{
+                        labels: dailyRevenueData.map((entry) =>
+                          entry.hour !== undefined
+                            ? formatHourLabel(entry.hour)
+                            : formatDateLabel(entry.date)
+                        ),
+                        datasets: [
+                          {
+                            label: "Receita (R$)",
+                            data: dailyRevenueData.map((entry) => entry.revenue),
+                            backgroundColor: "#1D9E75",
+                            borderColor: "#1D9E75",
+                            borderWidth: 0,
+                            borderRadius: 4
+                          },
+                          {
+                            label: "Vendas (qtd)",
+                            data: dailyRevenueData.map((entry) => entry.sales_count),
+                            backgroundColor: "#EF9F27",
+                            borderColor: "#EF9F27",
+                            borderWidth: 0,
+                            borderRadius: 4,
+                            yAxisID: "y1"
+                          }
+                        ]
+                      }}
+                      options={{
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: {
+                          mode: "index",
+                          intersect: false
+                        },
+                        plugins: {
+                          legend: {
+                            display: true,
+                            position: "bottom",
+                            labels: {
+                              color: "#6b6a65",
+                              font: { size: 11 },
+                              padding: 12,
+                              usePointStyle: true,
+                              boxWidth: 8
+                            }
+                          },
+                          tooltip: {
+                            backgroundColor: "rgba(20, 21, 27, 0.95)",
+                            titleColor: "#e8e6df",
+                            bodyColor: "#e8e6df",
+                            borderColor: "#2a2d35",
+                            borderWidth: 1,
+                            padding: 8,
+                            callbacks: {
+                              label: (context) => {
+                                if (context.datasetIndex === 0) {
+                                  return `${context.dataset.label}: ${formatCurrency(context.parsed.y as number)}`;
+                                }
+                                return `${context.dataset.label}: ${Math.round(context.parsed.y as number)}`;
+                              }
+                            }
+                          }
+                        },
+                        scales: {
+                          x: {
+                            display: true,
+                            grid: {
+                              display: false
+                            },
+                            ticks: {
+                              color: "#6b6a65",
+                              font: { size: 10 }
+                            }
+                          },
+                          y: {
+                            display: true,
+                            position: "left",
+                            grid: {
+                              color: "#22262f",
+                              display: true
+                            },
+                            ticks: {
+                              color: "#6b6a65",
+                              font: { size: 10 },
+                              callback: (value) => formatCurrency(Number(value))
+                            }
+                          },
+                          y1: {
+                            display: true,
+                            position: "right",
+                            grid: {
+                              display: false
+                            },
+                            ticks: {
+                              color: "#6b6a65",
+                              font: { size: 10 }
+                            }
+                          }
+                        }
+                      }}
+                    />
                   </div>
-                ) : (
+                </ScrollArea>
+              ) : (
+                <div className="p-4">
                   <p className="text-sm text-[#6b6a65]">{loading ? "Carregando..." : "Sem vendas no período."}</p>
-                )}
-              </ScrollArea>
+                </div>
+              )}
             </section>
 
             <section className="overflow-hidden rounded-xl border border-[#2a2d35] bg-[#1a1d24]">

@@ -121,6 +121,7 @@ export interface ReportsDashboardRequest {
 
 export interface ReportsDailyPoint {
   date: string;
+  hour?: number;
   revenue: number;
   sales_count: number;
 }
