@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS product (
   barcode          TEXT    UNIQUE,
   unit_type        TEXT    NOT NULL CHECK(unit_type IN ('unit', 'kg')),
   price_per_unit   REAL    NOT NULL CHECK(price_per_unit >= 0),
-  stock_qty        REAL    NOT NULL DEFAULT 0,
+  stock_qty        REAL    NOT NULL DEFAULT 0 CHECK(stock_qty >= 0),
   stock_alert_qty  REAL    NOT NULL DEFAULT 0,
   category_id      INTEGER REFERENCES category(id),
   created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
@@ -111,6 +111,13 @@ function seedInitialData(db: Database.Database): void {
   });
 
   tx();
+}
+
+export function clearStock(db: Database.Database){
+  const update = db.prepare(`
+    UPDATE product SET stock_qty = 0
+    `)
+  update.run();
 }
 
 export function initializeDatabase(userDataPath: string): Database.Database {

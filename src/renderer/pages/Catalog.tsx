@@ -48,8 +48,8 @@ const fmtQty = (v: number, u: UnitType) =>
 type StockStatus = "ok" | "low" | "out";
 
 const stockStatus = (p: Product): StockStatus => {
-  if (p.stock_qty === 0)                  return "out";
-  if (p.stock_qty <= p.stock_alert_qty)   return "low";
+  if (p.stock_qty === 0 && p.stock_alert_qty > 0)                  return "out";
+  if (p.stock_qty <= p.stock_alert_qty && p.stock_alert_qty > 0)   return "low";
   return "ok";
 };
 
@@ -504,7 +504,7 @@ const ProductRow = ({ product: p, index, onEdit, onRestock }: RowProps) => {
       {/* Estoque — PROD-04: colorido quando baixo/zerado */}
       <div>
         <p className={`text-[13px] font-medium leading-tight ${stockColor}`}>
-          {fmtQty(p.stock_qty, p.unit_type)}
+          {p.stock_alert_qty > 0 ? fmtQty(p.stock_qty, p.unit_type) : '-'}
         </p>
         {status === "out" && (
           <p className="text-[10px] text-[#E24B4A] mt-0.5">Sem estoque</p>
