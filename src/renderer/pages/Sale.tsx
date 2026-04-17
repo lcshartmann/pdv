@@ -173,9 +173,6 @@ export default function SalePage(): JSX.Element {
     const bootstrap = async (): Promise<void> => {
       try {
         await loadProducts();
-        if (!saleId) {
-          await startNewSale({ force: true });
-        }
       } catch (error) {
         setErrorMessage(error instanceof Error ? error.message : "Falha ao carregar tela de venda.");
       }
@@ -348,7 +345,7 @@ export default function SalePage(): JSX.Element {
 
   const persistAddedItem = useCallback(
     async (product: Product, quantity: number): Promise<void> => {
-      if (!saleId || saleStatus !== "open") {
+      if (saleStatus !== "open") {
         setErrorMessage("Nenhuma venda aberta.");
         return;
       }
@@ -357,7 +354,14 @@ export default function SalePage(): JSX.Element {
       setErrorMessage(null);
 
       try {
-        const { item } = await window.api.saleAddItem({ saleId, productId: product.id, quantity });
+        let currentSaleId = saleId;
+        if (!currentSaleId) {
+          const saleResponse = await window.api.saleCreate();
+          currentSaleId = saleResponse.saleId;
+          uiStoreActions.setSaleId(currentSaleId);
+        }
+
+        const { item } = await window.api.saleAddItem({ saleId: currentSaleId, productId: product.id, quantity });
         const line = createLine(item, product);
 
         uiStoreActions.upsertSaleLine(line);
