@@ -160,8 +160,8 @@ export function registerIpcHandlers(db: Database.Database, services: IpcServices
       }
 
       const items = db
-        .prepare("SELECT product_id, quantity FROM sale_item WHERE sale_id = ?")
-        .all(saleId) as Array<{ product_id: number; quantity: number }>;
+        .prepare("SELECT product_id, quantity, stock_qty FROM sale_item JOIN product ON product.id = product_id WHERE sale_id = ?")
+        .all(saleId) as Array<{ product_id: number; quantity: number; stock_qty: number }>;
 
       db.prepare("UPDATE sale SET status = 'completed', completed_at = datetime('now') WHERE id = ?").run(saleId);
 
@@ -171,7 +171,7 @@ export function registerIpcHandlers(db: Database.Database, services: IpcServices
       );
 
       for (const item of items) {
-        const qty = Number(item.quantity);
+        const qty = item.quantity > item.stock_qty ? Number(item.stock_qty) : Number(item.quantity);
         updateStock.run(qty, item.product_id);
         insertMovement.run(item.product_id, -qty, `sale:${saleId}`);
       }
@@ -270,7 +270,7 @@ export function registerIpcHandlers(db: Database.Database, services: IpcServices
           COALESCE(SUM(total), 0) AS total_revenue
         FROM sale
         WHERE status = 'completed'
-          AND DATE(completed_at) BETWEEN DATE(?) AND DATE(?)
+          AND DATE(completed_at, 'localtime') BETWEEN DATE(?) AND DATE(?)
         `
       )
       .get(fromDate, toDate) as { total_sales: number; total_revenue: number };
@@ -293,15 +293,15 @@ export function registerIpcHandlers(db: Database.Database, services: IpcServices
         .prepare(
           `
           SELECT
-            DATE(completed_at) AS date,
-            CAST(STRFTIME('%H', completed_at) AS INTEGER) / 2 AS hour,
+            DATE(completed_at, 'localtime') AS date,
+            CAST(STRFTIME('%H', completed_at, 'localtime') AS INTEGER) / 2 AS hour,
             COALESCE(SUM(total), 0) AS revenue,
             COUNT(*) AS sales_count
           FROM sale
           WHERE status = 'completed'
-            AND DATE(completed_at) BETWEEN DATE(?) AND DATE(?)
-          GROUP BY DATE(completed_at), CAST(STRFTIME('%H', completed_at) AS INTEGER) / 2
-          ORDER BY DATE(completed_at) ASC, CAST(STRFTIME('%H', completed_at) AS INTEGER) / 2 ASC
+            AND DATE(completed_at, 'localtime') BETWEEN DATE(?) AND DATE(?)
+          GROUP BY DATE(completed_at, 'localtime'), CAST(STRFTIME('%H', completed_at, 'localtime') AS INTEGER) / 2
+          ORDER BY DATE(completed_at, 'localtime') ASC, CAST(STRFTIME('%H', completed_at, 'localtime') AS INTEGER) / 2 ASC
           `
         )
         .all(fromDate, toDate) as Array<{
@@ -322,14 +322,14 @@ export function registerIpcHandlers(db: Database.Database, services: IpcServices
         .prepare(
           `
           SELECT
-            DATE(completed_at) AS date,
+            DATE(completed_at, 'localtime') AS date,
             COALESCE(SUM(total), 0) AS revenue,
             COUNT(*) AS sales_count
           FROM sale
           WHERE status = 'completed'
-            AND DATE(completed_at) BETWEEN DATE(?) AND DATE(?)
-          GROUP BY DATE(completed_at)
-          ORDER BY DATE(completed_at) ASC
+            AND DATE(completed_at, 'localtime') BETWEEN DATE(?) AND DATE(?)
+          GROUP BY DATE(completed_at, 'localtime')
+          ORDER BY DATE(completed_at, 'localtime') ASC
           `
         )
         .all(fromDate, toDate) as ReportsDailyPoint[];
@@ -348,7 +348,7 @@ export function registerIpcHandlers(db: Database.Database, services: IpcServices
         JOIN sale s ON s.id = si.sale_id
         JOIN product p ON p.id = si.product_id
         WHERE s.status = 'completed'
-          AND DATE(s.completed_at) BETWEEN DATE(?) AND DATE(?)
+          AND DATE(s.completed_at, 'localtime') BETWEEN DATE(?) AND DATE(?)
         GROUP BY p.id, p.name, p.unit_type
         ORDER BY revenue DESC
         LIMIT 10
@@ -369,7 +369,7 @@ export function registerIpcHandlers(db: Database.Database, services: IpcServices
         JOIN sale s ON s.id = si.sale_id
         JOIN product p ON p.id = si.product_id
         WHERE s.status = 'completed'
-          AND DATE(s.completed_at) BETWEEN DATE(?) AND DATE(?)
+          AND DATE(s.completed_at, 'localtime') BETWEEN DATE(?) AND DATE(?)
         GROUP BY p.id, p.name, p.unit_type
         ORDER BY quantity DESC
         LIMIT 10
@@ -387,7 +387,7 @@ export function registerIpcHandlers(db: Database.Database, services: IpcServices
         FROM payment
         JOIN sale ON sale.id = payment.sale_id
         WHERE sale.status = 'completed'
-          AND DATE(sale.completed_at) BETWEEN DATE(?) AND DATE(?)
+          AND DATE(sale.completed_at, 'localtime') BETWEEN DATE(?) AND DATE(?)
         GROUP BY payment.method
         `
       )
@@ -416,7 +416,7 @@ export function registerIpcHandlers(db: Database.Database, services: IpcServices
           sale.status AS status
         FROM sale
         LEFT JOIN payment ON payment.sale_id = sale.id
-        WHERE DATE(COALESCE(sale.completed_at, sale.started_at)) BETWEEN DATE(?) AND DATE(?)
+        WHERE DATE(COALESCE(sale.completed_at, sale.started_at), 'localtime') BETWEEN DATE(?) AND DATE(?)
         ORDER BY COALESCE(sale.completed_at, sale.started_at) DESC
         LIMIT 50
         `
@@ -434,7 +434,7 @@ export function registerIpcHandlers(db: Database.Database, services: IpcServices
           p.stock_alert_qty AS stock_alert_qty,
           CASE WHEN p.stock_qty = 0 THEN 'out' ELSE 'low' END AS status
         FROM product p
-        WHERE p.stock_qty <= p.stock_alert_qty
+        WHERE p.stock_qty <= p.stock_alert_qty AND p.stock_alert_qty > 0
         ORDER BY status ASC, p.stock_qty ASC, p.name ASC
         LIMIT 10
         `
@@ -477,17 +477,17 @@ export function registerIpcHandlers(db: Database.Database, services: IpcServices
             .prepare(
               `
               SELECT
-                DATE(s.completed_at) AS date,
-                CAST(STRFTIME('%H', s.completed_at) AS INTEGER) / 2 AS hour,
+                DATE(s.completed_at, 'localtime') AS date,
+                CAST(STRFTIME('%H', s.completed_at, 'localtime') AS INTEGER) / 2 AS hour,
                 COALESCE(SUM(si.quantity), 0) AS quantity,
                 COALESCE(SUM(si.total), 0) AS revenue
               FROM sale_item si
               JOIN sale s ON s.id = si.sale_id
               WHERE s.status = 'completed'
                 AND si.product_id = ?
-                AND DATE(s.completed_at) BETWEEN DATE(?) AND DATE(?)
-              GROUP BY DATE(s.completed_at), CAST(STRFTIME('%H', s.completed_at) AS INTEGER) / 2
-              ORDER BY DATE(s.completed_at) ASC, CAST(STRFTIME('%H', s.completed_at) AS INTEGER) / 2 ASC
+                AND DATE(s.completed_at, 'localtime') BETWEEN DATE(?) AND DATE(?)
+              GROUP BY DATE(s.completed_at, 'localtime'), CAST(STRFTIME('%H', s.completed_at, 'localtime') AS INTEGER) / 2
+              ORDER BY DATE(s.completed_at, 'localtime') ASC, CAST(STRFTIME('%H', s.completed_at, 'localtime') AS INTEGER) / 2 ASC
               `
             )
             .all(selectedProductId, fromDate, toDate) as Array<{
@@ -508,16 +508,16 @@ export function registerIpcHandlers(db: Database.Database, services: IpcServices
             .prepare(
               `
               SELECT
-                DATE(s.completed_at) AS date,
+                DATE(s.completed_at, 'localtime') AS date,
                 COALESCE(SUM(si.quantity), 0) AS quantity,
                 COALESCE(SUM(si.total), 0) AS revenue
               FROM sale_item si
               JOIN sale s ON s.id = si.sale_id
               WHERE s.status = 'completed'
                 AND si.product_id = ?
-                AND DATE(s.completed_at) BETWEEN DATE(?) AND DATE(?)
-              GROUP BY DATE(s.completed_at)
-              ORDER BY DATE(s.completed_at) ASC
+                AND DATE(s.completed_at, 'localtime') BETWEEN DATE(?) AND DATE(?)
+              GROUP BY DATE(s.completed_at, 'localtime')
+              ORDER BY DATE(s.completed_at, 'localtime') ASC
               `
             )
             .all(selectedProductId, fromDate, toDate) as Array<{
@@ -542,7 +542,7 @@ export function registerIpcHandlers(db: Database.Database, services: IpcServices
             JOIN sale s ON s.id = si.sale_id
             WHERE s.status = 'completed'
               AND si.product_id = ?
-              AND DATE(s.completed_at) BETWEEN DATE(?) AND DATE(?)
+              AND DATE(s.completed_at, 'localtime') BETWEEN DATE(?) AND DATE(?)
             `
           )
           .get(selectedProductId, fromDate, toDate) as { total_quantity: number; total_revenue: number };

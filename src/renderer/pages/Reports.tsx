@@ -84,8 +84,10 @@ function formatHourLabel(periodIndex: number): string {
 }
 
 function formatDateTimeLabel(dateTime: string): string {
+  const normalized = dateTime.includes("T") ? dateTime : dateTime.replace(" ", "T");
+  const asUtc = /(Z|[+-]\d{2}:\d{2})$/.test(normalized) ? normalized : `${normalized}Z`;
   return new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
-    .format(new Date(dateTime));
+    .format(new Date(asUtc));
 }
 
 function formatQuantity(value: number, unitType: "unit" | "kg"): string {
