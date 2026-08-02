@@ -15,7 +15,9 @@
     "build:main": "tsc -p tsconfig.main.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.main.json --noEmit",
     "lint": "eslint . --ext .ts,.tsx",
-    "start": "electron ."
+    "start": "electron .",
+    "receipt:parse": "node scripts/parse-receipt.js",
+    "receipt:html": "node scripts/render-receipt-html.js"
   },
   "build": {
     "appId": "com.market.pos",
@@ -26,12 +28,18 @@
     ],
     "directories": {
       "buildResources": "assets"
+    },
+    "publish": {
+      "provider": "github",
+      "releaseType": "release"
     }
   },
   "dependencies": {
     "better-sqlite3": "^11.8.1",
     "chart.js": "^4.5.1",
     "escpos": "^3.0.0-alpha.6",
+    "escpos-network": "^3.0.0-alpha.5",
+    "escpos-usb": "^3.0.0-alpha.4",
     "mercadopago": "^2.8.0",
     "react": "^18.3.1",
     "react-chartjs-2": "^5.3.1",
