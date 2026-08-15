@@ -3,3 +3,9 @@ dist
 *.log
 market-pos.db
 mockup
+.env
+.opencode
+receipt-*.txt
+
+# Compiled artifacts emitted in-place under src/
+src/**/*.js

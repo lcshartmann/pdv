@@ -46,8 +46,17 @@ interface CashModalState {
   error: string | null;
 }
 
+interface PrinterWarningState {
+  open: boolean;
+  saleId: number | null;
+  message: string;
+}
+
 function formatCurrency(value: number): string {
-  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL"
+  }).format(value);
 }
 
 function formatQuantity(value: number, unitType: Product["unit_type"]): string {
@@ -55,7 +64,9 @@ function formatQuantity(value: number, unitType: Product["unit_type"]): string {
     return `${value.toFixed(3).replace(".", ",")} kg`;
   }
 
-  return new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 }).format(value);
+  return new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 }).format(
+    value
+  );
 }
 
 function createLine(item: SaleItem, product: Product): SaleLine {
@@ -63,7 +74,10 @@ function createLine(item: SaleItem, product: Product): SaleLine {
     saleItemId: item.id,
     productId: product.id,
     product: product.name,
-    detail: product.unit_type === "kg" ? `kg · ${formatCurrency(item.unit_price)}/kg` : "unidade",
+    detail:
+      product.unit_type === "kg"
+        ? `kg · ${formatCurrency(item.unit_price)}/kg`
+        : "unidade",
     quantityLabel: formatQuantity(item.quantity, product.unit_type),
     quantityValue: item.quantity,
     unitPrice: item.unit_price,
@@ -72,7 +86,9 @@ function createLine(item: SaleItem, product: Product): SaleLine {
 }
 
 export default function SalePage(): JSX.Element {
-  const { saleId, saleStatus, saleLines } = useUiStore((current) => current.saleSession);
+  const { saleId, saleStatus, saleLines } = useUiStore(
+    (current) => current.saleSession
+  );
   const [products, setProducts] = useState<Product[]>([]);
   const [search, setSearch] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -81,7 +97,11 @@ export default function SalePage(): JSX.Element {
   const [isUpdatingItem, setIsUpdatingItem] = useState(false);
   const [isCancellingSale, setIsCancellingSale] = useState(false);
   const [isProcessingCashPayment, setIsProcessingCashPayment] = useState(false);
-  const [unitModal, setUnitModal] = useState<UnitModalState>({ open: false, product: null, quantity: "1" });
+  const [unitModal, setUnitModal] = useState<UnitModalState>({
+    open: false,
+    product: null,
+    quantity: "1"
+  });
   const [weightModal, setWeightModal] = useState<WeightModalState>({
     open: false,
     product: null,
@@ -89,13 +109,31 @@ export default function SalePage(): JSX.Element {
     loading: false,
     scaleError: null
   });
-  const [editModal, setEditModal] = useState<EditModalState>({ open: false, line: null, quantity: "" });
+  const [editModal, setEditModal] = useState<EditModalState>({
+    open: false,
+    line: null,
+    quantity: ""
+  });
   const [editModalError, setEditModalError] = useState<string | null>(null);
-  const [cancelModal, setCancelModal] = useState<CancelModalState>({ open: false, error: null });
-  const [cashModal, setCashModal] = useState<CashModalState>({ open: false, amountReceived: "", error: null });
+  const [cancelModal, setCancelModal] = useState<CancelModalState>({
+    open: false,
+    error: null
+  });
+  const [cashModal, setCashModal] = useState<CashModalState>({
+    open: false,
+    amountReceived: "",
+    error: null
+  });
+  const [printerWarning, setPrinterWarning] = useState<PrinterWarningState>({
+    open: false,
+    saleId: null,
+    message: ""
+  });
   const [now, setNow] = useState(new Date());
   const [scaleConnected, setScaleConnected] = useState(false);
-  const [scaleStatusLabel, setScaleStatusLabel] = useState("Balança Prix 3 desconectada");
+  const [scaleStatusLabel, setScaleStatusLabel] = useState(
+    "Balança Prix 3 desconectada"
+  );
   const [lastScaleWeightKg, setLastScaleWeightKg] = useState(0);
 
   const startingSaleRef = useRef(false);
@@ -108,7 +146,9 @@ export default function SalePage(): JSX.Element {
       return [];
     }
 
-    return products.filter((product) => product.name.toLowerCase().includes(term)).slice(0, 8);
+    return products
+      .filter((product) => product.name.toLowerCase().includes(term))
+      .slice(0, 8);
   }, [products, search]);
 
   const loadProducts = useCallback(async (): Promise<void> => {
@@ -120,7 +160,11 @@ export default function SalePage(): JSX.Element {
     try {
       const status = await window.api.scaleGetStatus();
       setScaleConnected(status.connected);
-      setScaleStatusLabel(status.connected ? "Balança Prix 3 conectada" : "Balança Prix 3 desconectada");
+      setScaleStatusLabel(
+        status.connected
+          ? "Balança Prix 3 conectada"
+          : "Balança Prix 3 desconectada"
+      );
       setLastScaleWeightKg(status.lastWeightKg ?? 0);
     } catch {
       setScaleConnected(false);
@@ -128,41 +172,55 @@ export default function SalePage(): JSX.Element {
     }
   }, []);
 
-  const startNewSale = useCallback(async (options?: { force?: boolean }): Promise<void> => {
-    if (startingSaleRef.current) {
-      return;
-    }
+  const startNewSale = useCallback(
+    async (options?: { force?: boolean }): Promise<void> => {
+      if (startingSaleRef.current) {
+        return;
+      }
 
-    const force = options?.force ?? false;
-    const isCurrentSaleEmpty = saleStatus === "open" && saleLines.length === 0;
-    if (!force && isCurrentSaleEmpty) {
-      return;
-    }
+      const force = options?.force ?? false;
+      const isCurrentSaleEmpty =
+        saleStatus === "open" && saleLines.length === 0;
+      if (!force && isCurrentSaleEmpty) {
+        return;
+      }
 
-    startingSaleRef.current = true;
-    setIsStartingSale(true);
-    setErrorMessage(null);
-    uiStoreActions.setSaleStatus("open");
-    uiStoreActions.setSaleLines([]);
-    setSearch("");
-    setUnitModal({ open: false, product: null, quantity: "1" });
-    setWeightModal({ open: false, product: null, weight: "", loading: false, scaleError: null });
-    setEditModal({ open: false, line: null, quantity: "" });
-    setEditModalError(null);
-    setCancelModal({ open: false, error: null });
-    setCashModal({ open: false, amountReceived: "", error: null });
+      startingSaleRef.current = true;
+      setIsStartingSale(true);
+      setErrorMessage(null);
+      uiStoreActions.setSaleStatus("open");
+      uiStoreActions.setSaleLines([]);
+      setSearch("");
+      setUnitModal({ open: false, product: null, quantity: "1" });
+      setWeightModal({
+        open: false,
+        product: null,
+        weight: "",
+        loading: false,
+        scaleError: null
+      });
+      setEditModal({ open: false, line: null, quantity: "" });
+      setEditModalError(null);
+      setCancelModal({ open: false, error: null });
+      setCashModal({ open: false, amountReceived: "", error: null });
 
-    try {
-      const saleResponse = await window.api.saleCreate();
-      uiStoreActions.setSaleId(saleResponse.saleId);
-      searchInputRef.current?.focus();
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Falha ao iniciar nova venda.");
-    } finally {
-      startingSaleRef.current = false;
-      setIsStartingSale(false);
-    }
-  }, [saleLines.length, saleStatus]);
+      try {
+        const saleResponse = await window.api.saleCreate();
+        uiStoreActions.setSaleId(saleResponse.saleId);
+        searchInputRef.current?.focus();
+      } catch (error) {
+        setErrorMessage(
+          error instanceof Error
+            ? error.message
+            : "Falha ao iniciar nova venda."
+        );
+      } finally {
+        startingSaleRef.current = false;
+        setIsStartingSale(false);
+      }
+    },
+    [saleLines.length, saleStatus]
+  );
 
   useEffect(() => {
     if (bootstrappedRef.current) {
@@ -174,7 +232,11 @@ export default function SalePage(): JSX.Element {
       try {
         await loadProducts();
       } catch (error) {
-        setErrorMessage(error instanceof Error ? error.message : "Falha ao carregar tela de venda.");
+        setErrorMessage(
+          error instanceof Error
+            ? error.message
+            : "Falha ao carregar tela de venda."
+        );
       }
     };
 
@@ -195,19 +257,41 @@ export default function SalePage(): JSX.Element {
   }, [syncScaleStatus]);
 
   const clockLabel = useMemo(() => {
-    const time = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(now);
-    const date = new Intl.DateTimeFormat("pt-BR", { weekday: "short", day: "2-digit", month: "short" }).format(now);
+    const time = new Intl.DateTimeFormat("pt-BR", {
+      hour: "2-digit",
+      minute: "2-digit"
+    }).format(now);
+    const date = new Intl.DateTimeFormat("pt-BR", {
+      weekday: "short",
+      day: "2-digit",
+      month: "short"
+    }).format(now);
     return `${time} · ${date.replace(".", "")}`;
   }, [now]);
 
-  const subtotal = useMemo(() => saleLines.reduce((acc, line) => acc + line.total, 0), [saleLines]);
-  const unitCount = useMemo(() => saleLines.reduce((acc, line) => acc + line.quantityValue, 0), [saleLines]);
+  const subtotal = useMemo(
+    () => saleLines.reduce((acc, line) => acc + line.total, 0),
+    [saleLines]
+  );
+  const unitCount = useMemo(
+    () => saleLines.reduce((acc, line) => acc + line.quantityValue, 0),
+    [saleLines]
+  );
   const isCurrentSaleEmpty = saleStatus === "open" && saleLines.length === 0;
-  const amountReceivedValue = Number(cashModal.amountReceived.replace(",", "."));
-  const isAmountReceivedValid = Number.isFinite(amountReceivedValue) && amountReceivedValue >= 0;
-  const changeAmount = isAmountReceivedValid ? amountReceivedValue - subtotal : 0;
+  const amountReceivedValue = Number(
+    cashModal.amountReceived.replace(",", ".")
+  );
+  const isAmountReceivedValid =
+    Number.isFinite(amountReceivedValue) && amountReceivedValue >= 0;
+  const changeAmount = isAmountReceivedValid
+    ? amountReceivedValue - subtotal
+    : 0;
   const isCashConfirmDisabled =
-    isProcessingCashPayment || saleStatus !== "open" || subtotal <= 0 || !isAmountReceivedValid || amountReceivedValue < subtotal;
+    isProcessingCashPayment ||
+    saleStatus !== "open" ||
+    subtotal <= 0 ||
+    !isAmountReceivedValid ||
+    amountReceivedValue < subtotal;
 
   const openCashModal = useCallback((): void => {
     if (!saleId || saleStatus !== "open") {
@@ -228,17 +312,26 @@ export default function SalePage(): JSX.Element {
 
     const received = Number(cashModal.amountReceived.replace(",", "."));
     if (!Number.isFinite(received) || received < 0) {
-      setCashModal((state) => ({ ...state, error: "Valor recebido inválido." }));
+      setCashModal((state) => ({
+        ...state,
+        error: "Valor recebido inválido."
+      }));
       return;
     }
 
     if (subtotal <= 0) {
-      setCashModal((state) => ({ ...state, error: "Não há itens para pagamento." }));
+      setCashModal((state) => ({
+        ...state,
+        error: "Não há itens para pagamento."
+      }));
       return;
     }
 
     if (received < subtotal) {
-      setCashModal((state) => ({ ...state, error: "Valor recebido deve ser maior ou igual ao total." }));
+      setCashModal((state) => ({
+        ...state,
+        error: "Valor recebido deve ser maior ou igual ao total."
+      }));
       return;
     }
 
@@ -258,11 +351,25 @@ export default function SalePage(): JSX.Element {
       uiStoreActions.setSaleStatus("completed");
       setCashModal({ open: false, amountReceived: "", error: null });
     } catch (error) {
-      setCashModal({
-        open: true,
-        amountReceived: cashModal.amountReceived,
-        error: error instanceof Error ? error.message : "Falha ao finalizar pagamento em dinheiro."
-      });
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Falha ao finalizar pagamento em dinheiro.";
+      if (message.startsWith("[PRINTER_OFFLINE]")) {
+        uiStoreActions.setSaleStatus("completed");
+        setCashModal({ open: false, amountReceived: "", error: null });
+        setPrinterWarning({
+          open: true,
+          saleId,
+          message: message.replace("[PRINTER_OFFLINE] ", "")
+        });
+      } else {
+        setCashModal({
+          open: true,
+          amountReceived: cashModal.amountReceived,
+          error: message
+        });
+      }
     } finally {
       setIsProcessingCashPayment(false);
     }
@@ -271,6 +378,11 @@ export default function SalePage(): JSX.Element {
   const closeOpenModal = useCallback((): boolean => {
     if (cashModal.open) {
       setCashModal({ open: false, amountReceived: "", error: null });
+      return true;
+    }
+
+    if (printerWarning.open) {
+      setPrinterWarning({ open: false, saleId: null, message: "" });
       return true;
     }
 
@@ -286,7 +398,13 @@ export default function SalePage(): JSX.Element {
     }
 
     if (weightModal.open) {
-      setWeightModal({ open: false, product: null, weight: "", loading: false, scaleError: null });
+      setWeightModal({
+        open: false,
+        product: null,
+        weight: "",
+        loading: false,
+        scaleError: null
+      });
       return true;
     }
 
@@ -296,9 +414,22 @@ export default function SalePage(): JSX.Element {
     }
 
     return false;
-  }, [cancelModal.open, cashModal.open, editModal.open, unitModal.open, weightModal.open]);
+  }, [
+    cancelModal.open,
+    cashModal.open,
+    editModal.open,
+    printerWarning.open,
+    unitModal.open,
+    weightModal.open
+  ]);
 
-  const hasOpenModal = cashModal.open || unitModal.open || editModal.open || weightModal.open || cancelModal.open;
+  const hasOpenModal =
+    cashModal.open ||
+    printerWarning.open ||
+    unitModal.open ||
+    editModal.open ||
+    weightModal.open ||
+    cancelModal.open;
 
   useEffect(() => {
     document.body.dataset.posModalOpen = hasOpenModal ? "true" : "false";
@@ -341,7 +472,14 @@ export default function SalePage(): JSX.Element {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [closeOpenModal, hasOpenModal, openCashModal, saleId, saleStatus, startNewSale]);
+  }, [
+    closeOpenModal,
+    hasOpenModal,
+    openCashModal,
+    saleId,
+    saleStatus,
+    startNewSale
+  ]);
 
   const persistAddedItem = useCallback(
     async (product: Product, quantity: number): Promise<void> => {
@@ -361,7 +499,11 @@ export default function SalePage(): JSX.Element {
           uiStoreActions.setSaleId(currentSaleId);
         }
 
-        const { item } = await window.api.saleAddItem({ saleId: currentSaleId, productId: product.id, quantity });
+        const { item } = await window.api.saleAddItem({
+          saleId: currentSaleId,
+          productId: product.id,
+          quantity
+        });
         const line = createLine(item, product);
 
         uiStoreActions.upsertSaleLine(line);
@@ -369,7 +511,9 @@ export default function SalePage(): JSX.Element {
         setSearch("");
         searchInputRef.current?.focus();
       } catch (error) {
-        setErrorMessage(error instanceof Error ? error.message : "Falha ao adicionar item.");
+        setErrorMessage(
+          error instanceof Error ? error.message : "Falha ao adicionar item."
+        );
       } finally {
         setIsAddingItem(false);
       }
@@ -379,14 +523,26 @@ export default function SalePage(): JSX.Element {
 
   const runScaleRead = useCallback(async (product: Product): Promise<void> => {
     setScaleStatusLabel("Lendo balança...");
-    setWeightModal({ open: true, product, weight: "", loading: true, scaleError: null });
+    setWeightModal({
+      open: true,
+      product,
+      weight: "",
+      loading: true,
+      scaleError: null
+    });
 
     try {
       const weight = await window.api.scaleReadStableWeight();
       setScaleConnected(true);
       setScaleStatusLabel("Balança Prix 3 conectada");
       setLastScaleWeightKg(weight);
-      setWeightModal({ open: true, product, weight: weight.toFixed(3), loading: false, scaleError: null });
+      setWeightModal({
+        open: true,
+        product,
+        weight: weight.toFixed(3),
+        loading: false,
+        scaleError: null
+      });
     } catch {
       setScaleConnected(false);
       setScaleStatusLabel("Balança Prix 3 desconectada");
@@ -457,12 +613,22 @@ export default function SalePage(): JSX.Element {
     }
 
     await persistAddedItem(weightModal.product, quantity);
-    setWeightModal({ open: false, product: null, weight: "", loading: false, scaleError: null });
+    setWeightModal({
+      open: false,
+      product: null,
+      weight: "",
+      loading: false,
+      scaleError: null
+    });
   }, [persistAddedItem, weightModal]);
 
   const openEditModal = useCallback((line: SaleLine): void => {
     setEditModalError(null);
-    setEditModal({ open: true, line, quantity: line.quantityValue.toString().replace(".", ",") });
+    setEditModal({
+      open: true,
+      line,
+      quantity: line.quantityValue.toString().replace(".", ",")
+    });
   }, []);
 
   const confirmEditSelection = useCallback(async (): Promise<void> => {
@@ -470,7 +636,9 @@ export default function SalePage(): JSX.Element {
       return;
     }
 
-    const editedProduct = products.find((entry) => entry.id === editModal.line?.productId);
+    const editedProduct = products.find(
+      (entry) => entry.id === editModal.line?.productId
+    );
     if (!editedProduct) {
       setEditModalError("Produto do item não encontrado.");
       return;
@@ -483,7 +651,9 @@ export default function SalePage(): JSX.Element {
     }
 
     if (editedProduct.unit_type === "unit" && !Number.isInteger(quantity)) {
-      setEditModalError("Para produtos unitários, informe uma quantidade inteira.");
+      setEditModalError(
+        "Para produtos unitários, informe uma quantidade inteira."
+      );
       return;
     }
 
@@ -506,7 +676,9 @@ export default function SalePage(): JSX.Element {
       setEditModal({ open: false, line: null, quantity: "" });
       setEditModalError(null);
     } catch (error) {
-      setEditModalError(error instanceof Error ? error.message : "Falha ao atualizar item.");
+      setEditModalError(
+        error instanceof Error ? error.message : "Falha ao atualizar item."
+      );
     } finally {
       setIsUpdatingItem(false);
     }
@@ -521,10 +693,15 @@ export default function SalePage(): JSX.Element {
       setIsUpdatingItem(true);
       setErrorMessage(null);
       try {
-        await window.api.saleRemoveItem({ saleId, saleItemId: line.saleItemId });
+        await window.api.saleRemoveItem({
+          saleId,
+          saleItemId: line.saleItemId
+        });
         uiStoreActions.removeSaleLine(line.saleItemId);
       } catch (error) {
-        setErrorMessage(error instanceof Error ? error.message : "Falha ao remover item.");
+        setErrorMessage(
+          error instanceof Error ? error.message : "Falha ao remover item."
+        );
       } finally {
         setIsUpdatingItem(false);
       }
@@ -554,40 +731,89 @@ export default function SalePage(): JSX.Element {
       uiStoreActions.setSaleLines([]);
       setSearch("");
       setUnitModal({ open: false, product: null, quantity: "1" });
-      setWeightModal({ open: false, product: null, weight: "", loading: false, scaleError: null });
+      setWeightModal({
+        open: false,
+        product: null,
+        weight: "",
+        loading: false,
+        scaleError: null
+      });
       setEditModal({ open: false, line: null, quantity: "" });
       setEditModalError(null);
       setCancelModal({ open: false, error: null });
       setCashModal({ open: false, amountReceived: "", error: null });
+      setPrinterWarning({ open: false, saleId: null, message: "" });
     } catch (error) {
       setCancelModal({
         open: true,
-        error: error instanceof Error ? error.message : "Falha ao cancelar venda."
+        error:
+          error instanceof Error ? error.message : "Falha ao cancelar venda."
       });
     } finally {
       setIsCancellingSale(false);
     }
   }, [saleId, saleStatus]);
 
+  const retryPrinter = useCallback(async (): Promise<void> => {
+    if (!printerWarning.saleId) {
+      return;
+    }
+    setPrinterWarning((state) => ({
+      ...state,
+      message: "Tentando reimprimir..."
+    }));
+    try {
+      await window.api.reportsReprintReceipt({ saleId: printerWarning.saleId });
+      setPrinterWarning({ open: false, saleId: null, message: "" });
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Falha ao reimprimir comprovante.";
+      setPrinterWarning((state) => ({ ...state, message }));
+    }
+  }, [printerWarning.saleId]);
+
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[#111318] text-[#e8e6df]">
-
       <div className="flex items-center justify-between border-b border-[#2a2d35] bg-[#1a1d24] px-4 py-2">
         <nav className="flex items-center gap-2 text-sm">
-          <Link to="/" className="rounded-md bg-[#22262f] px-3 py-1.5 text-[#e8e6df]">
-            Venda <span className="ml-2 rounded border border-[#343945] bg-[#0f131f] px-1.5 py-0.5 text-xs">F1</span>
+          <Link
+            to="/"
+            className="rounded-md bg-[#22262f] px-3 py-1.5 text-[#e8e6df]"
+          >
+            Venda{" "}
+            <span className="ml-2 rounded border border-[#343945] bg-[#0f131f] px-1.5 py-0.5 text-xs">
+              F1
+            </span>
           </Link>
-          <Link to="/catalog" className="rounded-md px-3 py-1.5 text-[#c2c0b6] hover:bg-[#22262f] hover:text-[#e8e6df]">
-            Produtos <span className="ml-2 rounded border border-[#343945] bg-[#0f131f] px-1.5 py-0.5 text-xs">F6</span>
+          <Link
+            to="/catalog"
+            className="rounded-md px-3 py-1.5 text-[#c2c0b6] hover:bg-[#22262f] hover:text-[#e8e6df]"
+          >
+            Produtos{" "}
+            <span className="ml-2 rounded border border-[#343945] bg-[#0f131f] px-1.5 py-0.5 text-xs">
+              F6
+            </span>
           </Link>
-          <Link to="/reports" className="rounded-md px-3 py-1.5 text-[#c2c0b6] hover:bg-[#22262f] hover:text-[#e8e6df]">
-            Relatórios <span className="ml-2 rounded border border-[#343945] bg-[#0f131f] px-1.5 py-0.5 text-xs">F7</span>
+          <Link
+            to="/reports"
+            className="rounded-md px-3 py-1.5 text-[#c2c0b6] hover:bg-[#22262f] hover:text-[#e8e6df]"
+          >
+            Relatórios{" "}
+            <span className="ml-2 rounded border border-[#343945] bg-[#0f131f] px-1.5 py-0.5 text-xs">
+              F7
+            </span>
           </Link>
         </nav>
         <span className="text-sm text-[#9d9c99]">{clockLabel}</span>
       </div>
 
-      {errorMessage ? <div className="border-b border-[#3c1e24] bg-[#2b1519] px-4 py-2 text-sm text-[#ff8d8d]">{errorMessage}</div> : null}
+      {errorMessage ? (
+        <div className="border-b border-[#3c1e24] bg-[#2b1519] px-4 py-2 text-sm text-[#ff8d8d]">
+          {errorMessage}
+        </div>
+      ) : null}
 
       <div className="grid min-h-0 flex-1 grid-cols-[1fr_320px]">
         <section className="relative grid min-h-0 grid-rows-[auto_auto_1fr_auto] border-r border-[#2a2d35]">
@@ -607,7 +833,9 @@ export default function SalePage(): JSX.Element {
                 placeholder="Buscar produto por nome..."
                 className="w-full rounded-lg border border-[#1D9E75] bg-[#22262f] px-4 py-2 text-base text-[#e8e6df] outline-none placeholder:text-[#8d8c89] focus:border-[#2ad6a2] disabled:cursor-not-allowed disabled:border-[#353846] disabled:text-[#6f706c]"
               />
-              <span className="rounded border border-[#2d3240] bg-[#111522] px-2 py-1 text-xs text-[#8b8d95]">F2</span>
+              <span className="rounded border border-[#2d3240] bg-[#111522] px-2 py-1 text-xs text-[#8b8d95]">
+                F2
+              </span>
             </div>
           </div>
 
@@ -621,7 +849,8 @@ export default function SalePage(): JSX.Element {
                 >
                   <span className="text-sm text-[#e8e6df]">{product.name}</span>
                   <span className="text-xs text-[#9ea097]">
-                    {product.unit_type === "kg" ? "kg" : "unidade"} · {formatCurrency(product.price_per_unit)}
+                    {product.unit_type === "kg" ? "kg" : "unidade"} ·{" "}
+                    {formatCurrency(product.price_per_unit)}
                   </span>
                 </button>
               ))}
@@ -638,17 +867,32 @@ export default function SalePage(): JSX.Element {
 
           <ScrollArea className="min-h-0 overflow-y-auto">
             {saleLines.length === 0 ? (
-              <div className="px-4 py-8 text-sm text-[#7f807c]">Venda aberta. Pesquise um produto para adicionar.</div>
+              <div className="px-4 py-8 text-sm text-[#7f807c]">
+                Venda aberta. Pesquise um produto para adicionar.
+              </div>
             ) : (
               saleLines.map((line) => (
-                <div key={line.saleItemId} className="grid grid-cols-[1fr_110px_130px_130px_100px] items-center border-b border-[#232732] px-4 py-3">
+                <div
+                  key={line.saleItemId}
+                  className="grid grid-cols-[1fr_110px_130px_130px_100px] items-center border-b border-[#232732] px-4 py-3"
+                >
                   <div className="min-w-0">
-                    <p className="truncate text-base font-medium text-[#e8e6df]">{line.product}</p>
-                    <p className="truncate text-sm text-[#8c8b88]">{line.detail}</p>
+                    <p className="truncate text-base font-medium text-[#e8e6df]">
+                      {line.product}
+                    </p>
+                    <p className="truncate text-sm text-[#8c8b88]">
+                      {line.detail}
+                    </p>
                   </div>
-                  <p className="text-center text-sm text-[#d4d3cf]">{line.quantityLabel}</p>
-                  <p className="text-center text-sm text-[#d4d3cf]">{formatCurrency(line.unitPrice)}</p>
-                  <p className="text-center text-sm font-medium text-[#d4d3cf]">{formatCurrency(line.total)}</p>
+                  <p className="text-center text-sm text-[#d4d3cf]">
+                    {line.quantityLabel}
+                  </p>
+                  <p className="text-center text-sm text-[#d4d3cf]">
+                    {formatCurrency(line.unitPrice)}
+                  </p>
+                  <p className="text-center text-sm font-medium text-[#d4d3cf]">
+                    {formatCurrency(line.total)}
+                  </p>
                   <div className="flex items-center justify-end gap-1.5">
                     <button
                       onClick={() => openEditModal(line)}
@@ -672,29 +916,48 @@ export default function SalePage(): JSX.Element {
 
           <footer className="flex items-center justify-between border-t border-[#2a2d35] bg-[#1a1d24] px-4 py-2 text-sm">
             <p className="text-[#7f807c]">
-              <span className={`mr-2 inline-block h-2 w-2 rounded-full ${scaleConnected ? "bg-[#00b386]" : "bg-[#ff6f99]"}`} />
+              <span
+                className={`mr-2 inline-block h-2 w-2 rounded-full ${scaleConnected ? "bg-[#00b386]" : "bg-[#ff6f99]"}`}
+              />
               {scaleStatusLabel}
             </p>
-            <p className="font-medium text-[#00b4a1]">{lastScaleWeightKg.toFixed(3).replace(".", ",")} kg</p>
+            <p className="font-medium text-[#00b4a1]">
+              {lastScaleWeightKg.toFixed(3).replace(".", ",")} kg
+            </p>
           </footer>
         </section>
 
         <aside className="grid min-h-0 grid-rows-[auto_auto_1fr_auto] bg-[#1a1d24]">
           <div className="space-y-2 border-b border-[#2a2d35] px-4 py-4">
-            <p className="text-sm text-[#9c9b97]">Venda #{saleId ? String(saleId).padStart(4, "0") : "----"}</p>
+            <p className="text-sm text-[#9c9b97]">
+              Venda #{saleId ? String(saleId).padStart(4, "0") : "----"}
+            </p>
             <p
               className={`text-xs font-medium ${
-                saleStatus === "cancelled" ? "text-[#ff6f99]" : saleStatus === "completed" ? "text-[#7dc8ff]" : "text-[#7fd1b6]"
+                saleStatus === "cancelled"
+                  ? "text-[#ff6f99]"
+                  : saleStatus === "completed"
+                    ? "text-[#7dc8ff]"
+                    : "text-[#7fd1b6]"
               }`}
             >
-              {saleStatus === "cancelled" ? "Cancelada" : saleStatus === "completed" ? "Concluída" : "Aberta"}
+              {saleStatus === "cancelled"
+                ? "Cancelada"
+                : saleStatus === "completed"
+                  ? "Concluída"
+                  : "Aberta"}
             </p>
             <p className="text-sm text-[#8e8d8a]">Total</p>
-            <p className="text-4xl font-medium leading-none text-[#f3f1eb]">{formatCurrency(subtotal)}</p>
-            <p className="text-sm text-[#8f8e8b]">
-              {saleLines.length} itens · {unitCount.toLocaleString("pt-BR")} unidades
+            <p className="text-4xl font-medium leading-none text-[#f3f1eb]">
+              {formatCurrency(subtotal)}
             </p>
-            <p className="text-xs text-[#6b6a65]">{products.length} produtos carregados</p>
+            <p className="text-sm text-[#8f8e8b]">
+              {saleLines.length} itens · {unitCount.toLocaleString("pt-BR")}{" "}
+              unidades
+            </p>
+            <p className="text-xs text-[#6b6a65]">
+              {products.length} produtos carregados
+            </p>
           </div>
 
           <div className="flex items-center justify-between border-b border-[#2a2d35] px-4 py-3 text-sm">
@@ -703,22 +966,30 @@ export default function SalePage(): JSX.Element {
           </div>
 
           <div className="space-y-3 px-4 py-4">
-            <p className="text-xs uppercase tracking-wide text-[#888784]">Forma de pagamento</p>
+            <p className="text-xs uppercase tracking-wide text-[#888784]">
+              Forma de pagamento
+            </p>
             <button
               onClick={openCashModal}
               disabled={!saleId || saleStatus !== "open"}
               className="flex w-full items-center justify-between rounded-lg bg-[#11ad7d] px-4 py-3 text-sm font-medium text-[#063f2d] disabled:cursor-not-allowed disabled:opacity-50"
             >
               <span>Dinheiro</span>
-              <span className="rounded bg-[#101521] px-1.5 py-0.5 text-xs text-[#7f838a]">F3</span>
+              <span className="rounded bg-[#101521] px-1.5 py-0.5 text-xs text-[#7f838a]">
+                F3
+              </span>
             </button>
             <button className="flex w-full items-center justify-between rounded-lg border border-[#EF9F27] bg-[#2d2612] px-4 py-3 text-sm font-medium text-[#efab2d]">
               <span>PIX</span>
-              <span className="rounded bg-[#101521] px-1.5 py-0.5 text-xs text-[#7f838a]">F4</span>
+              <span className="rounded bg-[#101521] px-1.5 py-0.5 text-xs text-[#7f838a]">
+                F4
+              </span>
             </button>
             <button className="flex w-full items-center justify-between rounded-lg border border-[#378ADD] bg-[#0e2337] px-4 py-3 text-sm font-medium text-[#66b1ff]">
               <span>Cartão (Point)</span>
-              <span className="rounded bg-[#101521] px-1.5 py-0.5 text-xs text-[#7f838a]">F5</span>
+              <span className="rounded bg-[#101521] px-1.5 py-0.5 text-xs text-[#7f838a]">
+                F5
+              </span>
             </button>
           </div>
 
@@ -728,14 +999,20 @@ export default function SalePage(): JSX.Element {
               disabled={isStartingSale || isCurrentSaleEmpty}
               className="rounded-lg bg-[#222834] px-3 py-3 text-left text-sm font-medium text-[#d2d2cf] disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Nova venda <span className="ml-2 rounded bg-[#101521] px-1.5 py-0.5 text-xs text-[#7f838a]">F1</span>
+              Nova venda{" "}
+              <span className="ml-2 rounded bg-[#101521] px-1.5 py-0.5 text-xs text-[#7f838a]">
+                F1
+              </span>
             </button>
             <button
               onClick={openCancelModal}
               disabled={!saleId || saleStatus !== "open" || isCancellingSale}
               className="rounded-lg border border-[#ff0059] bg-[#2a0714] px-3 py-3 text-left text-sm font-medium text-[#ff4f8a] disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Cancelar <span className="ml-2 rounded bg-[#101521] px-1.5 py-0.5 text-xs text-[#7f838a]">Esc</span>
+              Cancelar{" "}
+              <span className="ml-2 rounded bg-[#101521] px-1.5 py-0.5 text-xs text-[#7f838a]">
+                Esc
+              </span>
             </button>
           </div>
         </aside>
@@ -745,28 +1022,50 @@ export default function SalePage(): JSX.Element {
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-sm rounded-xl border border-[#2a2d35] bg-[#1a1d24] p-4">
             <h2 className="text-lg font-medium">Pagamento em dinheiro</h2>
-            <p className="mt-1 text-sm text-[#9ea097]">Total da venda: {formatCurrency(subtotal)}</p>
+            <p className="mt-1 text-sm text-[#9ea097]">
+              Total da venda: {formatCurrency(subtotal)}
+            </p>
             <form
               onSubmit={(event) => {
                 event.preventDefault();
                 void confirmCashPayment();
               }}
             >
-              <label className="mt-4 block text-sm text-[#9ea097]">Valor recebido</label>
+              <label className="mt-4 block text-sm text-[#9ea097]">
+                Valor recebido
+              </label>
               <input
                 autoFocus
                 value={cashModal.amountReceived}
-                onChange={(event) => setCashModal((state) => ({ ...state, amountReceived: event.target.value }))}
+                onChange={(event) =>
+                  setCashModal((state) => ({
+                    ...state,
+                    amountReceived: event.target.value
+                  }))
+                }
                 className="mt-1 w-full rounded-md border border-[#2a2d35] bg-[#22262f] px-3 py-2 text-sm outline-none focus:border-[#1D9E75]"
               />
-              <p className={`mt-2 text-sm ${changeAmount < 0 ? "text-[#ff8d8d]" : "text-[#7fd1b6]"}`}>
-                Troco: {changeAmount >= 0 ? formatCurrency(changeAmount) : `-${formatCurrency(Math.abs(changeAmount))}`}
+              <p
+                className={`mt-2 text-sm ${changeAmount < 0 ? "text-[#ff8d8d]" : "text-[#7fd1b6]"}`}
+              >
+                Troco:{" "}
+                {changeAmount >= 0
+                  ? formatCurrency(changeAmount)
+                  : `-${formatCurrency(Math.abs(changeAmount))}`}
               </p>
-              {cashModal.error ? <p className="mt-2 text-sm text-[#ff8d8d]">{cashModal.error}</p> : null}
+              {cashModal.error ? (
+                <p className="mt-2 text-sm text-[#ff8d8d]">{cashModal.error}</p>
+              ) : null}
               <div className="mt-4 flex justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setCashModal({ open: false, amountReceived: "", error: null })}
+                  onClick={() =>
+                    setCashModal({
+                      open: false,
+                      amountReceived: "",
+                      error: null
+                    })
+                  }
                   className="rounded-md border border-[#3a3f4d] px-3 py-1.5 text-sm"
                 >
                   Cancelar
@@ -788,7 +1087,9 @@ export default function SalePage(): JSX.Element {
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-sm rounded-xl border border-[#2a2d35] bg-[#1a1d24] p-4">
             <h2 className="text-lg font-medium">Quantidade</h2>
-            <p className="mt-1 text-sm text-[#9ea097]">{unitModal.product.name}</p>
+            <p className="mt-1 text-sm text-[#9ea097]">
+              {unitModal.product.name}
+            </p>
             <form
               onSubmit={(event) => {
                 event.preventDefault();
@@ -798,14 +1099,29 @@ export default function SalePage(): JSX.Element {
               <input
                 autoFocus
                 value={unitModal.quantity}
-                onChange={(event) => setUnitModal((state) => ({ ...state, quantity: event.target.value }))}
+                onChange={(event) =>
+                  setUnitModal((state) => ({
+                    ...state,
+                    quantity: event.target.value
+                  }))
+                }
                 className="mt-4 w-full rounded-md border border-[#2a2d35] bg-[#22262f] px-3 py-2 text-sm outline-none focus:border-[#1D9E75]"
               />
               <div className="mt-4 flex justify-end gap-2">
-                <button type="button" onClick={() => setUnitModal({ open: false, product: null, quantity: "1" })} className="rounded-md border border-[#3a3f4d] px-3 py-1.5 text-sm">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setUnitModal({ open: false, product: null, quantity: "1" })
+                  }
+                  className="rounded-md border border-[#3a3f4d] px-3 py-1.5 text-sm"
+                >
                   Cancelar
                 </button>
-                <button type="submit" disabled={isAddingItem} className="rounded-md bg-[#1D9E75] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60">
+                <button
+                  type="submit"
+                  disabled={isAddingItem}
+                  className="rounded-md bg-[#1D9E75] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
+                >
                   Confirmar
                 </button>
               </div>
@@ -818,7 +1134,9 @@ export default function SalePage(): JSX.Element {
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-sm rounded-xl border border-[#2a2d35] bg-[#1a1d24] p-4">
             <h2 className="text-lg font-medium">Editar quantidade</h2>
-            <p className="mt-1 text-sm text-[#9ea097]">{editModal.line.product}</p>
+            <p className="mt-1 text-sm text-[#9ea097]">
+              {editModal.line.product}
+            </p>
             <form
               onSubmit={(event) => {
                 event.preventDefault();
@@ -828,10 +1146,17 @@ export default function SalePage(): JSX.Element {
               <input
                 autoFocus
                 value={editModal.quantity}
-                onChange={(event) => setEditModal((state) => ({ ...state, quantity: event.target.value }))}
+                onChange={(event) =>
+                  setEditModal((state) => ({
+                    ...state,
+                    quantity: event.target.value
+                  }))
+                }
                 className="mt-4 w-full rounded-md border border-[#2a2d35] bg-[#22262f] px-3 py-2 text-sm outline-none focus:border-[#1D9E75]"
               />
-              {editModalError ? <p className="mt-2 text-sm text-[#ff8d8d]">{editModalError}</p> : null}
+              {editModalError ? (
+                <p className="mt-2 text-sm text-[#ff8d8d]">{editModalError}</p>
+              ) : null}
               <div className="mt-4 flex justify-end gap-2">
                 <button
                   type="button"
@@ -843,7 +1168,11 @@ export default function SalePage(): JSX.Element {
                 >
                   Cancelar
                 </button>
-                <button type="submit" disabled={isUpdatingItem} className="rounded-md bg-[#1D9E75] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60">
+                <button
+                  type="submit"
+                  disabled={isUpdatingItem}
+                  className="rounded-md bg-[#1D9E75] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
+                >
                   Confirmar
                 </button>
               </div>
@@ -856,18 +1185,39 @@ export default function SalePage(): JSX.Element {
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-md rounded-xl border border-[#2a2d35] bg-[#1a1d24] p-4">
             <h2 className="text-lg font-medium">Peso do produto</h2>
-            <p className="mt-1 text-sm text-[#9ea097]">{weightModal.product.name}</p>
+            <p className="mt-1 text-sm text-[#9ea097]">
+              {weightModal.product.name}
+            </p>
 
-            {weightModal.loading ? <p className="mt-4 text-sm text-[#c2c0b6]">Lendo peso estável da balança...</p> : null}
-            {weightModal.scaleError ? <p className="mt-4 text-sm text-[#ff8d8d]">{weightModal.scaleError}</p> : null}
+            {weightModal.loading ? (
+              <p className="mt-4 text-sm text-[#c2c0b6]">
+                Lendo peso estável da balança...
+              </p>
+            ) : null}
+            {weightModal.scaleError ? (
+              <p className="mt-4 text-sm text-[#ff8d8d]">
+                {weightModal.scaleError}
+              </p>
+            ) : null}
 
-            <label className="mt-4 block text-sm text-[#9ea097]">Peso (kg)</label>
+            <label className="mt-4 block text-sm text-[#9ea097]">
+              Peso (kg)
+            </label>
             <input
               autoFocus
               value={weightModal.weight}
-              onChange={(event) => setWeightModal((state) => ({ ...state, weight: event.target.value }))}
+              onChange={(event) =>
+                setWeightModal((state) => ({
+                  ...state,
+                  weight: event.target.value
+                }))
+              }
               onKeyDown={(event) => {
-                if (event.key === "Enter" && !isAddingItem && !weightModal.loading) {
+                if (
+                  event.key === "Enter" &&
+                  !isAddingItem &&
+                  !weightModal.loading
+                ) {
                   event.preventDefault();
                   void confirmWeightSelection();
                 }
@@ -889,7 +1239,15 @@ export default function SalePage(): JSX.Element {
 
               <div className="flex gap-2">
                 <button
-                  onClick={() => setWeightModal({ open: false, product: null, weight: "", loading: false, scaleError: null })}
+                  onClick={() =>
+                    setWeightModal({
+                      open: false,
+                      product: null,
+                      weight: "",
+                      loading: false,
+                      scaleError: null
+                    })
+                  }
                   className="rounded-md border border-[#3a3f4d] px-3 py-1.5 text-sm"
                 >
                   Cancelar
@@ -910,11 +1268,16 @@ export default function SalePage(): JSX.Element {
       {cancelModal.open ? (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/50 p-4">
           <div className="w-full max-w-sm rounded-xl border border-[#2a2d35] bg-[#1a1d24] p-4">
-            <h2 className="text-lg font-medium text-[#ff8cad]">Cancelar venda</h2>
+            <h2 className="text-lg font-medium text-[#ff8cad]">
+              Cancelar venda
+            </h2>
             <p className="mt-2 text-sm text-[#c2c0b6]">
-              Tem certeza que deseja cancelar esta venda? Esta ação define o status como <strong>cancelled</strong> e não exclui o registro.
+              Tem certeza que deseja cancelar esta venda? Esta ação define o
+              status como <strong>cancelled</strong> e não exclui o registro.
             </p>
-            {cancelModal.error ? <p className="mt-3 text-sm text-[#ff8d8d]">{cancelModal.error}</p> : null}
+            {cancelModal.error ? (
+              <p className="mt-3 text-sm text-[#ff8d8d]">{cancelModal.error}</p>
+            ) : null}
             <form
               className="mt-4 flex justify-end gap-2"
               onSubmit={(event) => {
@@ -937,6 +1300,43 @@ export default function SalePage(): JSX.Element {
                 Confirmar cancelamento
               </button>
             </form>
+          </div>
+        </div>
+      ) : null}
+
+      {printerWarning.open ? (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-sm rounded-xl border border-border bg-panel p-4">
+            <h2 className="text-lg font-medium text-warning">
+              Impressora offline
+            </h2>
+            <p className="mt-2 text-sm text-text-secondary">
+              A venda foi concluída com sucesso, mas o comprovante não foi
+              impresso.
+            </p>
+            {printerWarning.message ? (
+              <p className="mt-3 rounded-lg bg-surface p-2 text-sm text-error-text">
+                {printerWarning.message}
+              </p>
+            ) : null}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  setPrinterWarning({ open: false, saleId: null, message: "" })
+                }
+                className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-text-secondary"
+              >
+                Fechar
+              </button>
+              <button
+                type="button"
+                onClick={() => void retryPrinter()}
+                className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-white"
+              >
+                Reimprimir comprovante
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
