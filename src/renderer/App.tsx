@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { HashRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { Toaster } from "sonner";
 import CatalogPage from "./pages/Catalog";
 import ReportsPage from "./pages/Reports";
 import SalePage from "./pages/Sale";
@@ -49,6 +50,7 @@ export default function App(): JSX.Element {
           <Route path="/catalog" element={<CatalogPage />} />
           <Route path="/reports" element={<ReportsPage />} />
         </Routes>
+        <Toaster theme="dark" position="top-right" richColors closeButton />
       </div>
     </HashRouter>
   );
