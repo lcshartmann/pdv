@@ -93,6 +93,13 @@ export interface ProductCreateResponse {
   productId: number;
 }
 
+export interface ProductExportResponse {
+  /** true quando o usuário fechou o diálogo de salvar sem escolher destino. */
+  canceled: boolean;
+  /** Caminho absoluto do arquivo gravado (ausente quando cancelado). */
+  path?: string;
+}
+
 export interface ProductUpdateRequest {
   id: number;
   name: string;
@@ -244,6 +251,7 @@ export interface RendererApi {
   categoryList: () => Promise<Category[]>;
   productCreate: (payload: ProductCreateRequest) => Promise<ProductCreateResponse>;
   productUpdate: (payload: ProductUpdateRequest) => Promise<void>;
+  productExport: () => Promise<ProductExportResponse>;
   paymentCreate: (payload: PaymentCreateRequest) => Promise<PaymentCreateResponse>;
   reportsDashboard: (payload: ReportsDashboardRequest) => Promise<ReportsDashboardResponse>;
   reportsSaleDetail: (payload: { saleId: number }) => Promise<ReportsSaleDetailResponse>;

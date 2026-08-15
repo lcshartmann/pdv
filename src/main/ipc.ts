@@ -1,4 +1,5 @@
-import { ipcMain } from "electron";
+import { ipcMain, dialog, BrowserWindow } from "electron";
+import * as fs from "node:fs";
 import type Database from "better-sqlite3";
 import type {
   Category,
@@ -19,6 +20,7 @@ import type {
   ReportsTopProduct,
   ProductCreateRequest,
   ProductCreateResponse,
+  ProductExportResponse,
   ProductUpdateRequest,
   SaleAddItemRequest,
   SaleAddItemResponse,
@@ -33,6 +35,7 @@ import type {
 } from "../shared/types";
 import { PrinterService } from "./services/printer";
 import { ScaleService } from "./services/scale";
+import { buildCatalogCsv } from "./services/productExport";
 
 interface SaleAggregate {
   subtotal: number;
@@ -344,6 +347,35 @@ export function registerIpcHandlers(
       payload.category_id ?? null,
       payload.id
     );
+  });
+
+  ipcMain.handle("product:export", async () => {
+    const csv = buildCatalogCsv(db);
+
+    const now = new Date();
+    const defaultName = `produtos-${now.getFullYear()}-${String(
+      now.getMonth() + 1
+    ).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}.csv`;
+
+    const options = {
+      title: "Exportar produtos",
+      defaultPath: defaultName,
+      filters: [{ name: "CSV", extensions: ["csv"] }]
+    };
+    const focused = BrowserWindow.getFocusedWindow();
+    const result = focused
+      ? await dialog.showSaveDialog(focused, options)
+      : await dialog.showSaveDialog(options);
+
+    if (result.canceled || !result.filePath) {
+      return { canceled: true } satisfies ProductExportResponse;
+    }
+
+    await fs.promises.writeFile(result.filePath, csv, "utf8");
+    return {
+      canceled: false,
+      path: result.filePath
+    } satisfies ProductExportResponse;
   });
 
   ipcMain.handle(

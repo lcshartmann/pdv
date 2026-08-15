@@ -24,6 +24,7 @@ import {
   type ChangeEvent,
 } from "react";
 import { Link } from "react-router-dom";
+import { toast } from "sonner";
 import ScrollArea from "../components/ScrollArea";
 import { uiStoreActions, useUiStore, type CatalogStockFilter } from "../store/uiStore";
 import type { Category, Product as ApiProduct, UnitType } from "../../shared/types";
@@ -711,6 +712,17 @@ export default function Catalog() {
     }
   };
 
+  /** PDV-3: exporta o catálogo inteiro para CSV via diálogo nativo. */
+  const handleExport = async (): Promise<void> => {
+    try {
+      const result = await window.api.productExport();
+      if (result.canceled) return;
+      toast.success(`Exportado para ${result.path}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Falha ao exportar.");
+    }
+  };
+
   // ── Colunas da tabela ──
   const COLS: { key: SortKey | ""; label: string }[] = [
     { key: "name",          label: "Produto"   },
@@ -807,6 +819,15 @@ export default function Catalog() {
             </button>
           ))}
         </div>
+
+        {/* PDV-3: exportar catálogo em CSV */}
+        <button
+          onClick={() => void handleExport()}
+          title="Exportar catálogo em CSV"
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#22262f] border border-[#2a2d35] text-[13px] text-[#c2c0b6] font-medium hover:bg-[#2a2d35] hover:text-[#e8e6df] transition-colors whitespace-nowrap shrink-0"
+        >
+          ↓ Exportar
+        </button>
 
         {/* PROD-01: botão novo produto */}
         <button

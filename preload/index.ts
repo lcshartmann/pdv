@@ -13,6 +13,7 @@ const api: RendererApi = {
   categoryList: () => ipcRenderer.invoke("category:list"),
   productCreate: (payload) => ipcRenderer.invoke("product:create", payload),
   productUpdate: (payload) => ipcRenderer.invoke("product:update", payload),
+  productExport: () => ipcRenderer.invoke("product:export"),
   paymentCreate: (payload) => ipcRenderer.invoke("payment:create", payload),
   reportsDashboard: (payload) => ipcRenderer.invoke("reports:dashboard", payload),
   reportsSaleDetail: (payload) => ipcRenderer.invoke("reports:saleDetail", payload),
