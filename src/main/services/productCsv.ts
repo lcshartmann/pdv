@@ -116,10 +116,14 @@ export function stringifyProducts(products: ProductCsvExport[]): string {
 export function parseProductsCsv(content: string): ParseResult {
   const withoutBom = content.charCodeAt(0) === 0xfeff ? content.slice(1) : content;
 
+  // Detecta o separador em vez de fixá-lo: ao editar/re-salvar o CSV no
+  // Excel/LibreOffice o separador pode virar TAB (foi o que aconteceu em
+  // arquivos reais). Restringimos a `;` e TAB para nunca partir o decimal
+  // com vírgula (`6,9`) — que aconteceria se `,` fosse um candidato.
   const parsed = Papa.parse<Record<string, string>>(withoutBom, {
-    delimiter: ";",
     header: true,
-    skipEmptyLines: "greedy"
+    skipEmptyLines: "greedy",
+    delimitersToGuess: [";", "\t"]
   });
 
   const fields = parsed.meta.fields?.map((f) => f.trim()) ?? [];

@@ -4,6 +4,7 @@
  * Rodar: npx ts-node -P tsconfig.main.json src/main/services/productCsv.test.ts
  */
 import {
+  CSV_COLUMNS,
   csvToNumber,
   numberToCsv,
   parseProductsCsv,
@@ -119,6 +120,20 @@ test("campo com ; aspas e acento é preservado no round-trip", () => {
   assert(result.ok, "parse ok");
   if (!result.ok) return;
   assertEqual(result.rows[0].name, 'Refri "Cola"; 2L — açaí', "nome com ; e aspas preservado");
+});
+
+// ─── Separador alternativo (planilha re-salva como TAB) ─────────
+test("arquivo re-salvo com TAB ainda é parseado (delimiter autodetect)", () => {
+  const header = CSV_COLUMNS.join("\t");
+  const linha = ["56", "Abacate", "123", "kg", "6,9", "0", "0", "Hortifruti"].join("\t");
+  const tabCsv = `﻿${header}\n${linha}\n`;
+  const result = parseProductsCsv(tabCsv);
+  assert(result.ok, "TAB deve ser detectado e parseado");
+  if (!result.ok) return;
+  assertEqual(result.rows.length, 1, "uma linha");
+  assertEqual(result.rows[0].name, "Abacate", "nome preservado");
+  assertEqual(result.rows[0].barcode, "123", "barcode preservado");
+  assertEqual(csvToNumber(result.rows[0].price_per_unit), 6.9, "decimal com vírgula intacto");
 });
 
 // ─── Erros de arquivo inteiro ───────────────────────────────────
