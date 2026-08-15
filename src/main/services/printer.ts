@@ -74,8 +74,6 @@ function padEnd(str: string, len: number): string {
 
 class FileAdapter implements PrinterAdapter {
   private fd: number | null = null;
-  private resolvedPath: string | null = null;
-  
 
   constructor(private basePath: string) {}
 
@@ -85,7 +83,6 @@ class FileAdapter implements PrinterAdapter {
     const filePath = fs.existsSync(this.basePath) && fs.statSync(this.basePath).isDirectory()
       ? `${this.basePath}/receipt-${timestamp}.txt`
       : this.basePath;
-    this.resolvedPath = filePath;
     fs.open(filePath, "w", (err: Error | null, fd: number) => {
       if (err) {
         callback(err);
