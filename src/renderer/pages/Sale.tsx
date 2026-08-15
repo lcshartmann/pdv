@@ -630,6 +630,17 @@ export default function SalePage(): JSX.Element {
       scaleError: null
     });
 
+    if(!scaleConnected){
+       setWeightModal({
+          open: true,
+          product,
+          weight: "",
+          loading: false,
+          scaleError: "Balança desconectada. Informe o peso manualmente."
+        });
+        return;
+    }
+
     try {
       const weight = await window.api.scaleReadStableWeight();
       setScaleConnected(true);
@@ -764,11 +775,17 @@ export default function SalePage(): JSX.Element {
 
     const quantity = Number(weightModal.weight.replace(",", "."));
     if (!Number.isFinite(quantity) || quantity <= 0) {
-      setErrorMessage("Peso inválido.");
+      setWeightModal(prev => ({
+        ...prev,
+        scaleError: "Peso inválido."
+      }));
       return;
     }
     if (!/^\d+(?:[.,]\d{1,3})?$/.test(weightModal.weight.trim())) {
-      setErrorMessage("Peso deve ter até 3 casas decimais.");
+      setWeightModal(prev => ({
+        ...prev,
+        scaleError: "Peso deve ter até 3 casas decimais."
+      }));
       return;
     }
 
