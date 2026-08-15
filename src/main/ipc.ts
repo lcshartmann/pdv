@@ -22,8 +22,11 @@ import type {
   ProductCreateRequest,
   ProductCreateResponse,
   ProductExportResponse,
+  ProductImportCommitRequest,
+  ProductImportCommitResponse,
   ProductImportValidateResponse,
   ProductUpdateRequest,
+  ValidatedImportRow,
   SaleAddItemRequest,
   SaleAddItemResponse,
   SaleCancelRequest,
@@ -436,6 +439,64 @@ export function registerIpcHandlers(
       }
     } satisfies ProductImportValidateResponse;
   });
+
+  ipcMain.handle(
+    "product:importCommit",
+    (_event, payload: ProductImportCommitRequest) => {
+      const insertStmt = db.prepare(
+        `
+        INSERT INTO product (
+          name, barcode, unit_type, price_per_unit, stock_qty, stock_alert_qty, category_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        `
+      );
+      // UPDATE preserva o estoque do produto existente (não toca em stock_qty).
+      const updateStmt = db.prepare(
+        `
+        UPDATE product
+        SET
+          name = ?,
+          barcode = ?,
+          unit_type = ?,
+          price_per_unit = ?,
+          stock_alert_qty = ?,
+          category_id = ?,
+          updated_at = datetime('now')
+        WHERE id = ?
+        `
+      );
+
+      const applyBatch = db.transaction((rows: ValidatedImportRow[]) => {
+        for (const row of rows) {
+          if (row.op === "insert") {
+            insertStmt.run(
+              row.name,
+              row.barcode,
+              row.unit_type,
+              row.price_per_unit,
+              row.stock_qty ?? 0,
+              row.stock_alert_qty,
+              row.category_id
+            );
+          } else {
+            updateStmt.run(
+              row.name,
+              row.barcode,
+              row.unit_type,
+              row.price_per_unit,
+              row.stock_alert_qty,
+              row.category_id,
+              row.id
+            );
+          }
+        }
+        return rows.length;
+      });
+
+      const applied = applyBatch(payload.rows);
+      return { applied } satisfies ProductImportCommitResponse;
+    }
+  );
 
   ipcMain.handle(
     "reports:dashboard",

@@ -453,8 +453,8 @@ const RestockModal = ({ product, onClose, onConfirm }: RestockModalProps) => {
 interface ImportPreviewModalProps {
   preview: ProductImportPreview;
   onClose: () => void;
-  /** PDV-5 fará a gravação; por ora o botão Confirmar fica inativo. */
-  onConfirm: () => void;
+  /** Grava o lote validado. Resolve `true` em sucesso (modal fecha) e `false` em falha. */
+  onConfirm: () => Promise<boolean>;
 }
 
 const SummaryPill = ({
@@ -475,6 +475,14 @@ const SummaryPill = ({
 const ImportPreviewModal = ({ preview, onClose, onConfirm }: ImportPreviewModalProps) => {
   const { summary, errors, fileName, validRows } = preview;
   const hasWork = summary.toInsert + summary.toUpdate > 0;
+  const [committing, setCommitting] = useState(false);
+
+  const handleConfirm = async (): Promise<void> => {
+    if (committing || !hasWork) return;
+    setCommitting(true); // trava contra duplo-clique
+    const ok = await onConfirm();
+    if (!ok) setCommitting(false); // em sucesso o modal é desmontado pelo pai
+  };
 
   return (
     <Modal
@@ -485,17 +493,17 @@ const ImportPreviewModal = ({ preview, onClose, onConfirm }: ImportPreviewModalP
         <>
           <button
             onClick={onClose}
-            className="px-4 py-2 rounded-lg bg-[#22262f] border border-[#2a2d35] text-[13px] text-[#c2c0b6] hover:bg-[#2a2d35] transition-colors"
+            disabled={committing}
+            className="px-4 py-2 rounded-lg bg-[#22262f] border border-[#2a2d35] text-[13px] text-[#c2c0b6] hover:bg-[#2a2d35] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             Cancelar
           </button>
           <button
-            onClick={onConfirm}
-            disabled
-            title="A gravação chega no próximo passo (PDV-5)."
+            onClick={() => void handleConfirm()}
+            disabled={!hasWork || committing}
             className="px-4 py-2 rounded-lg bg-[#1D9E75] text-[#085041] text-[13px] font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
           >
-            Confirmar ({validRows.length})
+            {committing ? "Aplicando…" : `Confirmar (${validRows.length})`}
           </button>
         </>
       }
@@ -843,6 +851,20 @@ export default function Catalog() {
     }
   };
 
+  /** PDV-5: grava o lote validado numa transação; recarrega o catálogo. */
+  const handleImportCommit = async (preview: ProductImportPreview): Promise<boolean> => {
+    try {
+      const { applied } = await window.api.productImportCommit({ rows: preview.validRows });
+      toast.success(`${applied} aplicados, ${preview.summary.ignored} ignorados`);
+      await loadCatalog();
+      closeModal();
+      return true;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Falha ao gravar o import.");
+      return false;
+    }
+  };
+
   // ── Colunas da tabela ──
   const COLS: { key: SortKey | ""; label: string }[] = [
     { key: "name",          label: "Produto"   },
@@ -1109,9 +1131,7 @@ export default function Catalog() {
         <ImportPreviewModal
           preview={modal.preview}
           onClose={closeModal}
-          onConfirm={() => {
-            /* PDV-5: gravação transacional do lote validado. */
-          }}
+          onConfirm={() => handleImportCommit(modal.preview)}
         />
       )}
     </div>

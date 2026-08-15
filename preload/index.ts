@@ -15,6 +15,7 @@ const api: RendererApi = {
   productUpdate: (payload) => ipcRenderer.invoke("product:update", payload),
   productExport: () => ipcRenderer.invoke("product:export"),
   productImportValidate: () => ipcRenderer.invoke("product:importValidate"),
+  productImportCommit: (payload) => ipcRenderer.invoke("product:importCommit", payload),
   paymentCreate: (payload) => ipcRenderer.invoke("payment:create", payload),
   reportsDashboard: (payload) => ipcRenderer.invoke("reports:dashboard", payload),
   reportsSaleDetail: (payload) => ipcRenderer.invoke("reports:saleDetail", payload),

@@ -148,6 +148,16 @@ export type ProductImportValidateResponse =
   | { canceled: false; ok: false; error: string }
   | { canceled: false; ok: true; preview: ProductImportPreview };
 
+export interface ProductImportCommitRequest {
+  /** exatamente o lote validado que o renderer recebeu no preview (main stateless). */
+  rows: ValidatedImportRow[];
+}
+
+export interface ProductImportCommitResponse {
+  /** quantas linhas foram efetivamente gravadas (inserts + updates). */
+  applied: number;
+}
+
 export interface ProductUpdateRequest {
   id: number;
   name: string;
@@ -301,6 +311,9 @@ export interface RendererApi {
   productUpdate: (payload: ProductUpdateRequest) => Promise<void>;
   productExport: () => Promise<ProductExportResponse>;
   productImportValidate: () => Promise<ProductImportValidateResponse>;
+  productImportCommit: (
+    payload: ProductImportCommitRequest
+  ) => Promise<ProductImportCommitResponse>;
   paymentCreate: (payload: PaymentCreateRequest) => Promise<PaymentCreateResponse>;
   reportsDashboard: (payload: ReportsDashboardRequest) => Promise<ReportsDashboardResponse>;
   reportsSaleDetail: (payload: { saleId: number }) => Promise<ReportsSaleDetailResponse>;
