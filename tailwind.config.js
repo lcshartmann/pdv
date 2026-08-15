@@ -65,6 +65,15 @@ export default {
           "Monaco",
           "Consolas",
           "monospace"
+        ],
+        serif: [
+          "Iowan Old Style",
+          "Palatino Linotype",
+          "Palatino",
+          "Georgia",
+          "Cambria",
+          "ui-serif",
+          "serif"
         ]
       },
       borderRadius: {
