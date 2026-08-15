@@ -27,6 +27,7 @@ import type {
   SaleCreateResponse,
   SaleItem,
   SaleRemoveItemRequest,
+  SaleRemoveLastItemRequest,
   ScaleStatus,
   SaleUpdateItemQuantityRequest
 } from "../shared/types";
@@ -145,6 +146,16 @@ export function registerIpcHandlers(
       db.prepare("DELETE FROM sale_item WHERE id = ? AND sale_id = ?").run(
         payload.saleItemId,
         payload.saleId
+      );
+      recalculateSaleTotals(payload.saleId);
+    }
+  );
+
+  ipcMain.handle(
+    "sale:removeLastItem",
+    (_event, payload: SaleRemoveLastItemRequest) => {
+      db.prepare("DELETE FROM sale_item WHERE id = (SELECT id FROM sale_item WHERE sale_id = ? ORDER BY id DESC LIMIT 1);").run(
+        payload.saleId,
       );
       recalculateSaleTotals(payload.saleId);
     }

@@ -5,6 +5,7 @@ const api: RendererApi = {
   saleCreate: () => ipcRenderer.invoke("sale:create"),
   saleAddItem: (payload) => ipcRenderer.invoke("sale:addItem", payload),
   saleRemoveItem: (payload) => ipcRenderer.invoke("sale:removeItem", payload),
+  saleRemoveLastItem: (payload) => ipcRenderer.invoke("sale:removeLastItem", payload),
   saleUpdateItemQuantity: (payload) => ipcRenderer.invoke("sale:updateItemQuantity", payload),
   saleComplete: (payload) => ipcRenderer.invoke("sale:complete", payload),
   saleCancel: (payload) => ipcRenderer.invoke("sale:cancel", payload),

@@ -556,6 +556,11 @@ export default function SalePage(): JSX.Element {
           setCancelModal({ open: true, error: null });
         }
       }
+
+      if (event.key === "Delete") {
+        event.preventDefault();
+        removeLastSaleLine()
+      }
     };
 
     window.addEventListener("keydown", onKeyDown);
@@ -864,6 +869,30 @@ export default function SalePage(): JSX.Element {
     [saleId, saleStatus]
   );
 
+  const removeLastSaleLine = useCallback(
+    async (): Promise<void> => {
+      if (!saleId || saleStatus !== "open") {
+        return;
+      }
+
+      setIsUpdatingItem(true);
+      setErrorMessage(null);
+      try {
+        await window.api.saleRemoveLastItem({
+          saleId,
+        });
+        uiStoreActions.removeLastSaleLine();
+      } catch (error) {
+        setErrorMessage(
+          error instanceof Error ? error.message : "Falha ao remover item."
+        );
+      } finally {
+        setIsUpdatingItem(false);
+      }
+    },
+    [saleId, saleStatus]
+  );
+
   const openCancelModal = useCallback((): void => {
     if (!saleId || saleStatus !== "open") {
       return;
@@ -1137,7 +1166,7 @@ export default function SalePage(): JSX.Element {
                       disabled={saleStatus !== "open"}
                       className="rounded border border-[#303543] bg-[#202532] px-2 py-1 text-xs text-[#9ca1ab] disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      Del
+                      X
                     </button>
                   </div>
                 </div>

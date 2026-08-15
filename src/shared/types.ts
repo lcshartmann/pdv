@@ -61,6 +61,10 @@ export interface SaleRemoveItemRequest {
   saleItemId: number;
 }
 
+export interface SaleRemoveLastItemRequest {
+  saleId: number;
+}
+
 export interface SaleUpdateItemQuantityRequest {
   saleId: number;
   saleItemId: number;
@@ -232,6 +236,7 @@ export interface RendererApi {
   saleCreate: () => Promise<SaleCreateResponse>;
   saleAddItem: (payload: SaleAddItemRequest) => Promise<SaleAddItemResponse>;
   saleRemoveItem: (payload: SaleRemoveItemRequest) => Promise<void>;
+  saleRemoveLastItem: (payload: SaleRemoveLastItemRequest) => Promise<void>;
   saleUpdateItemQuantity: (payload: SaleUpdateItemQuantityRequest) => Promise<SaleAddItemResponse>;
   saleComplete: (payload: SaleCompleteRequest) => Promise<void>;
   saleCancel: (payload: SaleCancelRequest) => Promise<void>;

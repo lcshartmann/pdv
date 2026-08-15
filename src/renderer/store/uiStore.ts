@@ -155,5 +155,14 @@ export const uiStoreActions = {
         saleLines: current.saleSession.saleLines.filter((entry) => entry.saleItemId !== saleItemId)
       }
     }));
+  },
+  removeLastSaleLine(): void {
+    setState((current) => ({
+      ...current,
+      saleSession: {
+        ...current.saleSession,
+        saleLines: current.saleSession.saleLines.slice(0, -1)
+      }
+    }));
   }
 };
