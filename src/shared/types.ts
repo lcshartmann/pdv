@@ -111,7 +111,7 @@ export interface ProductImportError {
 /** Linha já validada e normalizada, pronta para o commit (PDV-5). */
 export interface ValidatedImportRow {
   line: number;
-  op: "insert" | "update";
+  op: "insert" | "update" | "unchanged";
   /** id do produto existente (apenas em update); null em insert. */
   id: number | null;
   name: string;
@@ -129,6 +129,8 @@ export interface ValidatedImportRow {
 export interface ProductImportSummary {
   toInsert: number;
   toUpdate: number;
+  /** linhas com id cujos valores são idênticos ao produto atual (não gravadas). */
+  unchanged: number;
   /** linhas com erro (puladas). */
   ignored: number;
   /** updates cujo stock_qty foi ignorado por ter mudado. */

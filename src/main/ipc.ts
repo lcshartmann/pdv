@@ -416,7 +416,9 @@ export function registerIpcHandlers(
     }
 
     const products = db
-      .prepare("SELECT id, barcode, stock_qty FROM product")
+      .prepare(
+        "SELECT id, name, barcode, unit_type, price_per_unit, stock_qty, stock_alert_qty, category_id FROM product"
+      )
       .all() as ExistingProductRow[];
     const categories = db
       .prepare("SELECT id, name FROM category")
@@ -467,6 +469,7 @@ export function registerIpcHandlers(
       );
 
       const applyBatch = db.transaction((rows: ValidatedImportRow[]) => {
+        let applied = 0;
         for (const row of rows) {
           if (row.op === "insert") {
             insertStmt.run(
@@ -478,7 +481,8 @@ export function registerIpcHandlers(
               row.stock_alert_qty,
               row.category_id
             );
-          } else {
+            applied++;
+          } else if (row.op === "update") {
             updateStmt.run(
               row.name,
               row.barcode,
@@ -488,9 +492,11 @@ export function registerIpcHandlers(
               row.category_id,
               row.id
             );
+            applied++;
           }
+          // op "unchanged": nada a gravar.
         }
-        return rows.length;
+        return applied;
       });
 
       const applied = applyBatch(payload.rows);

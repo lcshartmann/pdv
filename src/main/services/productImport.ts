@@ -30,11 +30,16 @@ import type {
   ValidatedImportRow
 } from "../../shared/types";
 
-/** Snapshot mínimo de produto necessário para validar. */
+/** Snapshot do produto atual — usado para validar e detectar no-ops. */
 export interface ExistingProductRow {
   id: number;
+  name: string;
   barcode: string | null;
+  unit_type: string;
+  price_per_unit: number;
   stock_qty: number;
+  stock_alert_qty: number;
+  category_id: number | null;
 }
 
 /** Snapshot mínimo de categoria necessário para validar. */
@@ -97,6 +102,7 @@ export function validateImportRows(
   const summary: ProductImportSummary = {
     toInsert: validRows.filter((r) => r.op === "insert").length,
     toUpdate: validRows.filter((r) => r.op === "update").length,
+    unchanged: validRows.filter((r) => r.op === "unchanged").length,
     ignored: errors.length,
     warnings: validRows.filter((r) => r.stockIgnoredWarning).length
   };
@@ -191,10 +197,24 @@ function validateRow(
     stock_qty = s;
   }
 
+  // No-op: linha com id cujos valores gravaveis batem com o produto atual.
+  // O estoque é deliberadamente ignorado no update, então não entra na
+  // comparação (mudança de estoque só gera o aviso acima, não um update).
+  const isUnchanged =
+    !!existing &&
+    existing.name === r.name &&
+    (existing.barcode ?? null) === barcode &&
+    existing.unit_type === unit_type &&
+    existing.price_per_unit === price &&
+    existing.stock_alert_qty === stock_alert_qty &&
+    (existing.category_id ?? null) === category_id;
+
+  const op = isUpdate ? (isUnchanged ? "unchanged" : "update") : "insert";
+
   return {
     row: {
       line: r.line,
-      op: isUpdate ? "update" : "insert",
+      op,
       id: existing ? existing.id : null,
       name: r.name,
       barcode,

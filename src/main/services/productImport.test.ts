@@ -41,8 +41,26 @@ function assertEqual<T>(actual: T, expected: T, message: string): void {
 
 // ─── Fixtures ───────────────────────────────────────────────────
 const PRODUCTS: ExistingProductRow[] = [
-  { id: 1, barcode: "7891000100103", stock_qty: 10 },
-  { id: 2, barcode: null, stock_qty: 5 }
+  {
+    id: 1,
+    name: "Arroz",
+    barcode: "7891000100103",
+    unit_type: "unit",
+    price_per_unit: 5,
+    stock_qty: 10,
+    stock_alert_qty: 2,
+    category_id: 20
+  },
+  {
+    id: 2,
+    name: "Feijão",
+    barcode: null,
+    unit_type: "unit",
+    price_per_unit: 8,
+    stock_qty: 5,
+    stock_alert_qty: 0,
+    category_id: 20
+  }
 ];
 const CATEGORIES: ExistingCategoryRow[] = [
   { id: 10, name: "Hortifruti" },
@@ -83,6 +101,36 @@ test("linha sem id vira INSERT; com id existente vira UPDATE", () => {
   const update = res.validRows.find((r) => r.op === "update")!;
   assertEqual(update.id, 1, "update aponta para o produto existente");
   assertEqual(update.stock_qty, null, "update ignora stock (null)");
+});
+
+test("linha id idêntica ao produto atual vira INALTERADA (não conta como update)", () => {
+  const res = validate([
+    // igual ao produto 1 em todos os campos gravaveis (estoque é ignorado)
+    row({
+      id: "1",
+      name: "Arroz",
+      barcode: "7891000100103",
+      unit_type: "unit",
+      price_per_unit: "5",
+      stock_qty: "10",
+      stock_alert_qty: "2",
+      category_name: "Mercearia"
+    }),
+    // mesma linha, mas com preço diferente → update de verdade
+    row({
+      id: "2",
+      name: "Feijão",
+      unit_type: "unit",
+      price_per_unit: "7,50",
+      stock_alert_qty: "0",
+      category_name: "Mercearia"
+    })
+  ]);
+  assertEqual(res.errors.length, 0, "sem erros");
+  assertEqual(res.summary.unchanged, 1, "uma inalterada");
+  assertEqual(res.summary.toUpdate, 1, "uma a atualizar");
+  const inalterada = res.validRows.find((r) => r.id === 1)!;
+  assertEqual(inalterada.op, "unchanged", "produto 1 inalterado");
 });
 
 // ─── Erros de célula ────────────────────────────────────────────

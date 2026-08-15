@@ -473,8 +473,9 @@ const SummaryPill = ({
 );
 
 const ImportPreviewModal = ({ preview, onClose, onConfirm }: ImportPreviewModalProps) => {
-  const { summary, errors, fileName, validRows } = preview;
-  const hasWork = summary.toInsert + summary.toUpdate > 0;
+  const { summary, errors, fileName } = preview;
+  const toApply = summary.toInsert + summary.toUpdate;
+  const hasWork = toApply > 0;
   const [committing, setCommitting] = useState(false);
 
   const handleConfirm = async (): Promise<void> => {
@@ -503,7 +504,7 @@ const ImportPreviewModal = ({ preview, onClose, onConfirm }: ImportPreviewModalP
             disabled={!hasWork || committing}
             className="px-4 py-2 rounded-lg bg-[#1D9E75] text-[#085041] text-[13px] font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
           >
-            {committing ? "Aplicando…" : `Confirmar (${validRows.length})`}
+            {committing ? "Aplicando…" : `Confirmar (${toApply})`}
           </button>
         </>
       }
@@ -517,6 +518,7 @@ const ImportPreviewModal = ({ preview, onClose, onConfirm }: ImportPreviewModalP
         <div className="flex gap-2">
           <SummaryPill label="a inserir" value={summary.toInsert} color="text-[#1D9E75]" />
           <SummaryPill label="a atualizar" value={summary.toUpdate} color="text-[#378ADD]" />
+          <SummaryPill label="inalteradas" value={summary.unchanged} color="text-[#6b6a65]" />
           <SummaryPill label="ignoradas" value={summary.ignored} color="text-[#E24B4A]" />
         </div>
 
@@ -855,7 +857,9 @@ export default function Catalog() {
   const handleImportCommit = async (preview: ProductImportPreview): Promise<boolean> => {
     try {
       const { applied } = await window.api.productImportCommit({ rows: preview.validRows });
-      toast.success(`${applied} aplicados, ${preview.summary.ignored} ignorados`);
+      toast.success(
+        `${applied} aplicados · ${preview.summary.unchanged} inalterados · ${preview.summary.ignored} ignorados`
+      );
       await loadCatalog();
       closeModal();
       return true;
