@@ -1,5 +1,6 @@
 import { ipcMain, dialog, BrowserWindow } from "electron";
 import * as fs from "node:fs";
+import * as path from "node:path";
 import type Database from "better-sqlite3";
 import type {
   Category,
@@ -21,6 +22,7 @@ import type {
   ProductCreateRequest,
   ProductCreateResponse,
   ProductExportResponse,
+  ProductImportValidateResponse,
   ProductUpdateRequest,
   SaleAddItemRequest,
   SaleAddItemResponse,
@@ -36,6 +38,12 @@ import type {
 import { PrinterService } from "./services/printer";
 import { ScaleService } from "./services/scale";
 import { buildCatalogCsv } from "./services/productExport";
+import { parseProductsCsv } from "./services/productCsv";
+import {
+  validateImportRows,
+  type ExistingCategoryRow,
+  type ExistingProductRow
+} from "./services/productImport";
 
 interface SaleAggregate {
   subtotal: number;
@@ -376,6 +384,57 @@ export function registerIpcHandlers(
       canceled: false,
       path: result.filePath
     } satisfies ProductExportResponse;
+  });
+
+  ipcMain.handle("product:importValidate", async () => {
+    const focused = BrowserWindow.getFocusedWindow();
+    const options: Electron.OpenDialogOptions = {
+      title: "Importar produtos",
+      filters: [{ name: "CSV", extensions: ["csv"] }],
+      properties: ["openFile"]
+    };
+    const result = focused
+      ? await dialog.showOpenDialog(focused, options)
+      : await dialog.showOpenDialog(options);
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return { canceled: true } satisfies ProductImportValidateResponse;
+    }
+
+    const filePath = result.filePaths[0];
+    const content = await fs.promises.readFile(filePath, "utf8");
+    const parsed = parseProductsCsv(content);
+    if (!parsed.ok) {
+      return {
+        canceled: false,
+        ok: false,
+        error: parsed.error
+      } satisfies ProductImportValidateResponse;
+    }
+
+    const products = db
+      .prepare("SELECT id, barcode, stock_qty FROM product")
+      .all() as ExistingProductRow[];
+    const categories = db
+      .prepare("SELECT id, name FROM category")
+      .all() as ExistingCategoryRow[];
+
+    const { summary, errors, validRows } = validateImportRows(
+      parsed.rows,
+      products,
+      categories
+    );
+
+    return {
+      canceled: false,
+      ok: true,
+      preview: {
+        fileName: path.basename(filePath),
+        summary,
+        errors,
+        validRows
+      }
+    } satisfies ProductImportValidateResponse;
   });
 
   ipcMain.handle(

@@ -100,6 +100,54 @@ export interface ProductExportResponse {
   path?: string;
 }
 
+// ─── Import de produtos (PDV-4 / PDV-5) ──────────────────────────────────────
+
+export interface ProductImportError {
+  /** Linha no arquivo (cabeçalho = 1). */
+  line: number;
+  message: string;
+}
+
+/** Linha já validada e normalizada, pronta para o commit (PDV-5). */
+export interface ValidatedImportRow {
+  line: number;
+  op: "insert" | "update";
+  /** id do produto existente (apenas em update); null em insert. */
+  id: number | null;
+  name: string;
+  barcode: string | null;
+  unit_type: UnitType;
+  /** número em insert; null em update (estoque é ignorado ao atualizar). */
+  stock_qty: number | null;
+  price_per_unit: number;
+  stock_alert_qty: number;
+  category_id: number | null;
+  /** true quando o CSV trouxe stock_qty diferente do atual num update (ignorado). */
+  stockIgnoredWarning: boolean;
+}
+
+export interface ProductImportSummary {
+  toInsert: number;
+  toUpdate: number;
+  /** linhas com erro (puladas). */
+  ignored: number;
+  /** updates cujo stock_qty foi ignorado por ter mudado. */
+  warnings: number;
+}
+
+export interface ProductImportPreview {
+  fileName: string;
+  summary: ProductImportSummary;
+  errors: ProductImportError[];
+  /** lote válido guardado no renderer para a fase de commit (main é stateless). */
+  validRows: ValidatedImportRow[];
+}
+
+export type ProductImportValidateResponse =
+  | { canceled: true }
+  | { canceled: false; ok: false; error: string }
+  | { canceled: false; ok: true; preview: ProductImportPreview };
+
 export interface ProductUpdateRequest {
   id: number;
   name: string;
@@ -252,6 +300,7 @@ export interface RendererApi {
   productCreate: (payload: ProductCreateRequest) => Promise<ProductCreateResponse>;
   productUpdate: (payload: ProductUpdateRequest) => Promise<void>;
   productExport: () => Promise<ProductExportResponse>;
+  productImportValidate: () => Promise<ProductImportValidateResponse>;
   paymentCreate: (payload: PaymentCreateRequest) => Promise<PaymentCreateResponse>;
   reportsDashboard: (payload: ReportsDashboardRequest) => Promise<ReportsDashboardResponse>;
   reportsSaleDetail: (payload: { saleId: number }) => Promise<ReportsSaleDetailResponse>;
