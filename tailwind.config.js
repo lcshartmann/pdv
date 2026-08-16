@@ -9,6 +9,25 @@ export default {
         panel: "#1a1d24",
         titlebar: "#0d0f14",
         border: "#2a2d35",
+        // Conjunto semântico usado pelos componentes shadcn. Como o app é
+        // sempre dark, cada token aponta direto para o valor escuro (sem
+        // variantes `dark:`). Mapeiam para a paleta existente acima.
+        foreground: "#e8e6df",
+        input: "#343945",
+        ring: "#2ad6a2",
+        card: "#1a1d24",
+        "card-foreground": "#e8e6df",
+        popover: "#1a1d24",
+        "popover-foreground": "#e8e6df",
+        "primary-foreground": "#04231a",
+        secondary: "#22262f",
+        "secondary-foreground": "#e8e6df",
+        muted: "#22262f",
+        "muted-foreground": "#8f8e8b",
+        accent: "#262b36",
+        "accent-foreground": "#e8e6df",
+        destructive: "#E24B4A",
+        "destructive-foreground": "#ffe9e9",
         primary: "#1D9E75",
         "primary-hover": "#1a8f69",
         "primary-dark": "#085041",
@@ -65,6 +84,15 @@ export default {
           "Monaco",
           "Consolas",
           "monospace"
+        ],
+        serif: [
+          "Iowan Old Style",
+          "Palatino Linotype",
+          "Palatino",
+          "Georgia",
+          "Cambria",
+          "ui-serif",
+          "serif"
         ]
       },
       borderRadius: {
@@ -81,5 +109,5 @@ export default {
       }
     }
   },
-  plugins: []
+  plugins: [require("tailwindcss-animate")]
 };

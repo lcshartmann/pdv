@@ -23,10 +23,16 @@ import {
   forwardRef,
   type ChangeEvent,
 } from "react";
-import { Link } from "react-router-dom";
+import NavBar from "../components/NavBar";
+import { toast } from "sonner";
 import ScrollArea from "../components/ScrollArea";
 import { uiStoreActions, useUiStore, type CatalogStockFilter } from "../store/uiStore";
-import type { Category, Product as ApiProduct, UnitType } from "../../shared/types";
+import type {
+  Category,
+  Product as ApiProduct,
+  ProductImportPreview,
+  UnitType,
+} from "../../shared/types";
 
 // ─── Tipos (espelham /shared/types.ts) ───────────────────────────────────────
 
@@ -442,6 +448,115 @@ const RestockModal = ({ product, onClose, onConfirm }: RestockModalProps) => {
   );
 };
 
+// ─── PDV-4 · Modal de preview do import ───────────────────────────────────────
+
+interface ImportPreviewModalProps {
+  preview: ProductImportPreview;
+  onClose: () => void;
+  /** Grava o lote validado. Resolve `true` em sucesso (modal fecha) e `false` em falha. */
+  onConfirm: () => Promise<boolean>;
+}
+
+const SummaryPill = ({
+  label,
+  value,
+  color,
+}: {
+  label: string;
+  value: number;
+  color: string;
+}) => (
+  <div className="flex-1 bg-[#22262f] rounded-lg px-3 py-2.5">
+    <p className={`text-2xl font-medium ${color}`}>{value}</p>
+    <p className="text-[11px] text-[#6b6a65] mt-0.5">{label}</p>
+  </div>
+);
+
+const ImportPreviewModal = ({ preview, onClose, onConfirm }: ImportPreviewModalProps) => {
+  const { summary, errors, fileName } = preview;
+  const toApply = summary.toInsert + summary.toUpdate;
+  const hasWork = toApply > 0;
+  const [committing, setCommitting] = useState(false);
+
+  const handleConfirm = async (): Promise<void> => {
+    if (committing || !hasWork) return;
+    setCommitting(true); // trava contra duplo-clique
+    const ok = await onConfirm();
+    if (!ok) setCommitting(false); // em sucesso o modal é desmontado pelo pai
+  };
+
+  return (
+    <Modal
+      title="Pré-visualização do import"
+      onClose={onClose}
+      width="w-[560px]"
+      footer={
+        <>
+          <button
+            onClick={onClose}
+            disabled={committing}
+            className="px-4 py-2 rounded-lg bg-[#22262f] border border-[#2a2d35] text-[13px] text-[#c2c0b6] hover:bg-[#2a2d35] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={() => void handleConfirm()}
+            disabled={!hasWork || committing}
+            className="px-4 py-2 rounded-lg bg-[#1D9E75] text-[#085041] text-[13px] font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+          >
+            {committing ? "Aplicando…" : `Confirmar (${toApply})`}
+          </button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-3">
+        <p className="text-[12px] text-[#6b6a65]">
+          Arquivo: <span className="text-[#c2c0b6] font-mono">{fileName}</span>
+        </p>
+
+        {/* Resumo agregado */}
+        <div className="flex gap-2">
+          <SummaryPill label="a inserir" value={summary.toInsert} color="text-[#1D9E75]" />
+          <SummaryPill label="a atualizar" value={summary.toUpdate} color="text-[#378ADD]" />
+          <SummaryPill label="inalteradas" value={summary.unchanged} color="text-[#6b6a65]" />
+          <SummaryPill label="ignoradas" value={summary.ignored} color="text-[#E24B4A]" />
+        </div>
+
+        {summary.warnings > 0 && (
+          <p className="text-[12px] text-[#EF9F27]">
+            {summary.warnings} produto{summary.warnings !== 1 ? "s" : ""} com estoque no CSV que será
+            ignorado (estoque só é aplicado em itens novos).
+          </p>
+        )}
+
+        {/* Lista de erros */}
+        {errors.length > 0 && (
+          <div>
+            <p className="text-[11px] uppercase tracking-wider text-[#6b6a65] mb-1.5">
+              Linhas ignoradas ({errors.length})
+            </p>
+            <ScrollArea className="max-h-48 overflow-y-auto rounded-lg border border-[#2a2d35] bg-[#111318]">
+              {errors.map((e) => (
+                <div
+                  key={e.line}
+                  className="flex gap-2 px-3 py-1.5 border-b border-[#1e2128] last:border-b-0 text-[12px]"
+                >
+                  <span className="text-[#6b6a65] font-mono shrink-0">L{e.line}</span>
+                  <span className="text-[#E24B4A]">{e.message}</span>
+                </div>
+              ))}
+            </ScrollArea>
+          </div>
+        )}
+
+        {!hasWork && errors.length === 0 && (
+          <p className="text-[12px] text-[#6b6a65]">Nada a importar neste arquivo.</p>
+        )}
+      </div>
+    </Modal>
+  );
+};
+
 // ─── Linha da tabela ──────────────────────────────────────────────────────────
 
 interface RowProps {
@@ -547,7 +662,8 @@ type ModalState =
   | { type: "none" }
   | { type: "new" }
   | { type: "edit"; product: Product }
-  | { type: "restock"; product: Product };
+  | { type: "restock"; product: Product }
+  | { type: "importPreview"; preview: ProductImportPreview };
 
 export default function Catalog() {
   const [products, setProducts]       = useState<Product[]>([]);
@@ -711,6 +827,48 @@ export default function Catalog() {
     }
   };
 
+  /** PDV-3: exporta o catálogo inteiro para CSV via diálogo nativo. */
+  const handleExport = async (): Promise<void> => {
+    try {
+      const result = await window.api.productExport();
+      if (result.canceled) return;
+      toast.success(`Exportado para ${result.path}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Falha ao exportar.");
+    }
+  };
+
+  /** PDV-4: abre um CSV e valida (dry-run), abrindo o modal de preview. */
+  const handleImport = async (): Promise<void> => {
+    try {
+      const result = await window.api.productImportValidate();
+      if (result.canceled) return;
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      setModal({ type: "importPreview", preview: result.preview });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Falha ao importar.");
+    }
+  };
+
+  /** PDV-5: grava o lote validado numa transação; recarrega o catálogo. */
+  const handleImportCommit = async (preview: ProductImportPreview): Promise<boolean> => {
+    try {
+      const { applied } = await window.api.productImportCommit({ rows: preview.validRows });
+      toast.success(
+        `${applied} aplicados · ${preview.summary.unchanged} inalterados · ${preview.summary.ignored} ignorados`
+      );
+      await loadCatalog();
+      closeModal();
+      return true;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Falha ao gravar o import.");
+      return false;
+    }
+  };
+
   // ── Colunas da tabela ──
   const COLS: { key: SortKey | ""; label: string }[] = [
     { key: "name",          label: "Produto"   },
@@ -726,32 +884,11 @@ export default function Catalog() {
     return <span className="text-[#1D9E75] text-[9px] ml-1">{sortDir === 1 ? "↑" : "↓"}</span>;
   };
 
-  const clockLabel = useMemo(() => {
-    const nowDate = new Date();
-    const time = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(nowDate);
-    const date = new Intl.DateTimeFormat("pt-BR", { weekday: "short", day: "2-digit", month: "short" }).format(nowDate);
-    return `${time} · ${date.replace(".", "")}`;
-  }, []);
-
-
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#111318] text-[#e8e6df]" style={{ fontFamily: "system-ui, sans-serif" }}>
 
      
-      <div className="flex items-center justify-between border-b border-[#2a2d35] bg-[#1a1d24] px-4 py-2">
-        <nav className="flex items-center gap-2 text-sm">
-          <Link to="/" className="rounded-md px-3 py-1.5 text-[#c2c0b6] hover:bg-[#22262f] hover:text-[#e8e6df]">
-            Venda <span className="ml-2 rounded border border-[#343945] bg-[#0f131f] px-1.5 py-0.5 text-xs">F1</span>
-          </Link>
-          <Link to="/" className="rounded-md bg-[#22262f] px-3 py-1.5 text-[#e8e6df]">
-            Produtos <span className="ml-2 rounded border border-[#343945] bg-[#0f131f] px-1.5 py-0.5 text-xs">F6</span>
-          </Link>
-          <Link to="/reports" className="rounded-md px-3 py-1.5 text-[#c2c0b6] hover:bg-[#22262f] hover:text-[#e8e6df]">
-            Relatórios <span className="ml-2 rounded border border-[#343945] bg-[#0f131f] px-1.5 py-0.5 text-xs">F7</span>
-          </Link>
-        </nav>
-        <span className="text-sm text-[#9d9c99]">{clockLabel}</span>
-      </div>
+      <NavBar />
 
       {/* ── Toolbar ── */}
       <div className="bg-[#1a1d24] border-b border-[#2a2d35] px-4 py-2.5 flex items-center gap-2.5 flex-wrap shrink-0">
@@ -763,7 +900,7 @@ export default function Catalog() {
           <Input
             ref={searchRef}
             className="pl-8 pr-14"
-              placeholder="Buscar por nome ou código de barras..."
+              placeholder="Buscar por nome ou código de barras…"
               value={search}
               onChange={(e: ChangeEvent<HTMLInputElement>) => uiStoreActions.setCatalogSearch(e.target.value)}
             />
@@ -807,6 +944,24 @@ export default function Catalog() {
             </button>
           ))}
         </div>
+
+        {/* PDV-3: exportar catálogo em CSV */}
+        <button
+          onClick={() => void handleExport()}
+          title="Exportar catálogo em CSV"
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#22262f] border border-[#2a2d35] text-[13px] text-[#c2c0b6] font-medium hover:bg-[#2a2d35] hover:text-[#e8e6df] transition-colors whitespace-nowrap shrink-0"
+        >
+          ↓ Exportar
+        </button>
+
+        {/* PDV-4: importar catálogo de CSV (preview) */}
+        <button
+          onClick={() => void handleImport()}
+          title="Importar produtos de um CSV"
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#22262f] border border-[#2a2d35] text-[13px] text-[#c2c0b6] font-medium hover:bg-[#2a2d35] hover:text-[#e8e6df] transition-colors whitespace-nowrap shrink-0"
+        >
+          ↑ Importar
+        </button>
 
         {/* PROD-01: botão novo produto */}
         <button
@@ -953,6 +1108,13 @@ export default function Catalog() {
           product={modal.product}
           onClose={closeModal}
           onConfirm={handleRestock}
+        />
+      )}
+      {modal.type === "importPreview" && (
+        <ImportPreviewModal
+          preview={modal.preview}
+          onClose={closeModal}
+          onConfirm={() => handleImportCommit(modal.preview)}
         />
       )}
     </div>

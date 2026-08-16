@@ -1,5 +1,19 @@
 import * as fs from "node:fs";
+import * as net from "node:net";
 import { getDb } from "../db";
+import type { PrinterStatus, PrinterType } from "../../shared/types";
+
+/** Config que o PrinterService recebe injetada (derivada de AppSettings). */
+export interface PrinterConfig {
+  type: PrinterType;
+  address: string;
+  storeName: string;
+  receiptFooter: string;
+  receiptShowQr: boolean;
+  storeCnpj: string;
+  storeAddress: string;
+  storePhone: string;
+}
 
 let escpos: typeof import("escpos") | null = null;
 try {
@@ -26,22 +40,6 @@ interface PrinterAdapter {
   open(callback: (err?: Error) => void): void;
   write(data: Buffer, callback: (err?: Error) => void): void;
   close(callback?: (err?: Error) => void): void;
-}
-
-function getPrinterConfig(): {
-  type: "usb" | "network" | "file";
-  address: string;
-} {
-  const type = (process.env.MARKET_POS_PRINTER_TYPE ?? "file") as
-    | "usb"
-    | "network"
-    | "file";
-  const address = process.env.MARKET_POS_PRINTER_ADDRESS ?? "";
-  return { type, address };
-}
-
-function getStoreName(): string {
-  return process.env.MARKET_POS_STORE_NAME ?? "Mercado Familiar";
 }
 
 function formatCurrency(value: number): string {
@@ -72,10 +70,25 @@ function padEnd(str: string, len: number): string {
   return str + " ".repeat(len - str.length);
 }
 
+/** Linhas de cabeçalho do cupom abaixo do nome da loja (só as preenchidas). */
+function storeInfoLines(config: PrinterConfig): string[] {
+  return [
+    config.storeCnpj.trim() ? `CNPJ: ${config.storeCnpj.trim()}` : "",
+    config.storeAddress.trim(),
+    config.storePhone.trim() ? `Tel: ${config.storePhone.trim()}` : ""
+  ].filter((line) => line.length > 0);
+}
+
+/** Rodapé configurável, quebrado por linha (ignora linhas vazias). */
+function receiptFooterLines(config: PrinterConfig): string[] {
+  return config.receiptFooter
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
 class FileAdapter implements PrinterAdapter {
   private fd: number | null = null;
-  private resolvedPath: string | null = null;
-  
 
   constructor(private basePath: string) {}
 
@@ -85,7 +98,6 @@ class FileAdapter implements PrinterAdapter {
     const filePath = fs.existsSync(this.basePath) && fs.statSync(this.basePath).isDirectory()
       ? `${this.basePath}/receipt-${timestamp}.txt`
       : this.basePath;
-    this.resolvedPath = filePath;
     fs.open(filePath, "w", (err: Error | null, fd: number) => {
       if (err) {
         callback(err);
@@ -204,14 +216,103 @@ function safeClose(
   });
 }
 
+function checkNetworkReachable(
+  address: string,
+  timeoutMs = 1500
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    const parts = address.split(":");
+    const host = parts[0];
+    const port = parts[1] ? Number(parts[1]) : 9100;
+    if (!host) {
+      resolve(false);
+      return;
+    }
+
+    const socket = new net.Socket();
+    const finish = (reachable: boolean): void => {
+      socket.destroy();
+      resolve(reachable);
+    };
+
+    socket.setTimeout(timeoutMs);
+    socket.once("connect", () => finish(true));
+    socket.once("timeout", () => finish(false));
+    socket.once("error", () => finish(false));
+    socket.connect(port, host);
+  });
+}
+
 export class PrinterService {
+  /**
+   * A config é lida a cada chamada (getConfig), então mudanças salvas nas
+   * configurações valem na hora — sem re-instanciar o serviço.
+   */
+  constructor(private readonly getConfig: () => PrinterConfig) {}
+
+  /**
+   * Healthcheck sob demanda da impressora, no mesmo espírito do getStatus()
+   * da balança. Não abre a impressora de fato — apenas verifica se o
+   * dispositivo/endereço está acessível para o tipo configurado.
+   */
+  async getStatus(): Promise<PrinterStatus> {
+    const config = this.getConfig();
+    return {
+      available: await this.isAvailable(config),
+      type: config.type,
+      address: config.address
+    };
+  }
+
+  /** Testa alcance de uma impressora de rede (host:porta) sob demanda. */
+  async checkNetwork(address: string): Promise<boolean> {
+    return checkNetworkReachable(address);
+  }
+
+  private async isAvailable(config: PrinterConfig): Promise<boolean> {
+    if (!escpos) {
+      return false;
+    }
+
+    if (config.type === "network") {
+      if (!NetworkAdapter) {
+        return false;
+      }
+      return checkNetworkReachable(config.address);
+    }
+
+    if (config.type === "file") {
+      const devicePath = config.address || "/dev/usb/lp0";
+      try {
+        await fs.promises.access(devicePath, fs.constants.W_OK);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    // USB
+    if (!UsbAdapter) {
+      return false;
+    }
+    try {
+      const usb = UsbAdapter as unknown as {
+        findPrinter?: () => unknown;
+      };
+      const found = usb.findPrinter?.();
+      return Array.isArray(found) ? found.length > 0 : Boolean(found);
+    } catch {
+      return false;
+    }
+  }
+
   async printReceipt(saleId: number): Promise<void> {
     if (!escpos) {
       throw new Error("Biblioteca de impressão não disponível.");
     }
 
     const db = getDb();
-    const config = getPrinterConfig();
+    const config = this.getConfig();
 
     const sale = db
       .prepare(
@@ -290,9 +391,13 @@ export class PrinterService {
         .align("ct")
         .style("b")
         .size(2, 2)
-        .text(getStoreName())
+        .text(config.storeName)
         .style("normal")
-        .size(1, 1)
+        .size(1, 1);
+      for (const line of storeInfoLines(config)) {
+        printer.text(line);
+      }
+      printer
         .newLine()
         .text(`Venda #${String(sale.id).padStart(4, "0")}`)
         .text(formatDateTime(sale.completed_at))
@@ -342,26 +447,77 @@ export class PrinterService {
       }
       printer.drawLine();
 
-      printer.align("ct").text("Consulte esta venda pelo QR Code");
-
-      await new Promise<void>((resolve, reject) => {
-        printer.qrimage(
-          `market-pos://sale/${sale.id}`,
-          { type: "png", mode: "dhdw" },
-          (err: Error | null) => {
-            if (err) {
-              reject(new Error(`Falha ao gerar QR Code: ${err.message}`));
-              return;
+      if (config.receiptShowQr) {
+        printer.align("ct").text("Consulte esta venda pelo QR Code");
+        await new Promise<void>((resolve, reject) => {
+          printer.qrimage(
+            `market-pos://sale/${sale.id}`,
+            { type: "png", mode: "dhdw" },
+            (err: Error | null) => {
+              if (err) {
+                reject(new Error(`Falha ao gerar QR Code: ${err.message}`));
+                return;
+              }
+              resolve();
             }
-            resolve();
-          }
-        );
-      });
+          );
+        });
+      }
 
+      printer.align("ct").newLine();
+      for (const line of receiptFooterLines(config)) {
+        printer.text(line);
+      }
+      printer.cut();
+      await printer.close();
+    } catch (error) {
+      await safeClose(printer, adapter);
+      throw error;
+    }
+  }
+
+  /**
+   * Imprime um cupom de teste com a config atual (salva), sem tocar no banco.
+   * Serve para validar impressora/endereço na tela de configurações.
+   */
+  async printTest(): Promise<void> {
+    if (!escpos) {
+      throw new Error("Biblioteca de impressão não disponível.");
+    }
+
+    const config = this.getConfig();
+    const adapter = createAdapter(config);
+    const printer = await escpos.Printer.create(adapter);
+
+    await openAdapter(adapter);
+
+    try {
+      printer
+        .font("a")
+        .align("ct")
+        .style("b")
+        .size(2, 2)
+        .text(config.storeName)
+        .style("normal")
+        .size(1, 1);
+      for (const line of storeInfoLines(config)) {
+        printer.text(line);
+      }
       printer
         .newLine()
-        .text("Obrigado pela preferência!")
-        .text("Volte sempre!");
+        .text("*** CUPOM DE TESTE ***")
+        .text(formatDateTime(new Date().toISOString()))
+        .drawLine()
+        .align("lt")
+        .text("Impressora configurada com sucesso.")
+        .text(`Tipo: ${config.type}`)
+        .text(`Endereço: ${config.address || "(padrão)"}`)
+        .drawLine();
+
+      printer.align("ct").newLine();
+      for (const line of receiptFooterLines(config)) {
+        printer.text(line);
+      }
       printer.cut();
       await printer.close();
     } catch (error) {

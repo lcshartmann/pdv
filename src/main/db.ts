@@ -2,6 +2,7 @@ import path from "node:path";
 import Database from "better-sqlite3";
 
 let dbInstance: Database.Database | null = null;
+let dbFilePath: string | null = null;
 
 const schema = `
 CREATE TABLE IF NOT EXISTS category (
@@ -64,6 +65,11 @@ CREATE TABLE IF NOT EXISTS stock_movement (
   created_at TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS setting (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 `;
@@ -75,6 +81,13 @@ export function getDb(): Database.Database {
     throw new Error("Database is not initialized.");
   }
   return dbInstance;
+}
+
+export function getDbPath(): string {
+  if (!dbFilePath) {
+    throw new Error("Database is not initialized.");
+  }
+  return dbFilePath;
 }
 
 function seedInitialData(db: Database.Database): void {
@@ -130,5 +143,6 @@ export function initializeDatabase(userDataPath: string): Database.Database {
   db.exec(schema);
   seedInitialData(db);
   dbInstance = db;
+  dbFilePath = dbPath;
   return db;
 }

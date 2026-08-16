@@ -61,6 +61,10 @@ export interface SaleRemoveItemRequest {
   saleItemId: number;
 }
 
+export interface SaleRemoveLastItemRequest {
+  saleId: number;
+}
+
 export interface SaleUpdateItemQuantityRequest {
   saleId: number;
   saleItemId: number;
@@ -69,6 +73,13 @@ export interface SaleUpdateItemQuantityRequest {
 
 export interface SaleCompleteRequest {
   saleId: number;
+}
+
+export interface SaleCompleteResponse {
+  /** true quando o comprovante foi impresso com sucesso. */
+  printed: boolean;
+  /** true quando a impressão foi pulada por a impressora estar offline. */
+  printerOffline: boolean;
 }
 
 export interface SaleCancelRequest {
@@ -87,6 +98,73 @@ export interface ProductCreateRequest {
 
 export interface ProductCreateResponse {
   productId: number;
+}
+
+export interface ProductExportResponse {
+  /** true quando o usuário fechou o diálogo de salvar sem escolher destino. */
+  canceled: boolean;
+  /** Caminho absoluto do arquivo gravado (ausente quando cancelado). */
+  path?: string;
+}
+
+// ─── Import de produtos (PDV-4 / PDV-5) ──────────────────────────────────────
+
+export interface ProductImportError {
+  /** Linha no arquivo (cabeçalho = 1). */
+  line: number;
+  message: string;
+}
+
+/** Linha já validada e normalizada, pronta para o commit (PDV-5). */
+export interface ValidatedImportRow {
+  line: number;
+  op: "insert" | "update" | "unchanged";
+  /** id do produto existente (apenas em update); null em insert. */
+  id: number | null;
+  name: string;
+  barcode: string | null;
+  unit_type: UnitType;
+  /** número em insert; null em update (estoque é ignorado ao atualizar). */
+  stock_qty: number | null;
+  price_per_unit: number;
+  stock_alert_qty: number;
+  category_id: number | null;
+  /** true quando o CSV trouxe stock_qty diferente do atual num update (ignorado). */
+  stockIgnoredWarning: boolean;
+}
+
+export interface ProductImportSummary {
+  toInsert: number;
+  toUpdate: number;
+  /** linhas com id cujos valores são idênticos ao produto atual (não gravadas). */
+  unchanged: number;
+  /** linhas com erro (puladas). */
+  ignored: number;
+  /** updates cujo stock_qty foi ignorado por ter mudado. */
+  warnings: number;
+}
+
+export interface ProductImportPreview {
+  fileName: string;
+  summary: ProductImportSummary;
+  errors: ProductImportError[];
+  /** lote válido guardado no renderer para a fase de commit (main é stateless). */
+  validRows: ValidatedImportRow[];
+}
+
+export type ProductImportValidateResponse =
+  | { canceled: true }
+  | { canceled: false; ok: false; error: string }
+  | { canceled: false; ok: true; preview: ProductImportPreview };
+
+export interface ProductImportCommitRequest {
+  /** exatamente o lote validado que o renderer recebeu no preview (main stateless). */
+  rows: ValidatedImportRow[];
+}
+
+export interface ProductImportCommitResponse {
+  /** quantas linhas foram efetivamente gravadas (inserts + updates). */
+  applied: number;
 }
 
 export interface ProductUpdateRequest {
@@ -221,6 +299,63 @@ export interface ReportsSaleDetailResponse {
   items: ReportsSaleDetailItem[];
 }
 
+export type PrinterType = "usb" | "network" | "file";
+
+/** Configuração completa do app, persistida na tabela `setting` (key/value). */
+export interface AppSettings {
+  // Balança
+  scalePort: string;
+  scaleBaudRate: number;
+  scaleTimeoutMs: number;
+  scaleStableFramesRequired: number;
+  scaleReconnectDelayMs: number;
+  scaleUsbPollIntervalMs: number;
+  // Impressora
+  printerType: PrinterType;
+  printerAddress: string;
+  // Identidade & recibo
+  storeName: string;
+  receiptFooter: string;
+  receiptShowQr: boolean;
+  storeCnpj: string;
+  storeAddress: string;
+  storePhone: string;
+}
+
+export type SettingsUpdateRequest = Partial<AppSettings>;
+
+export interface SerialPortInfo {
+  path: string;
+  manufacturer: string | null;
+}
+
+export interface PrinterTestResponse {
+  ok: boolean;
+  /** mensagem de erro quando ok=false. */
+  error?: string;
+}
+
+export interface NetworkCheckResponse {
+  reachable: boolean;
+}
+
+export interface DataBackupResponse {
+  canceled: boolean;
+  path?: string;
+}
+
+export interface DataRestoreResponse {
+  canceled: boolean;
+  /** true quando o arquivo escolhido não é um banco válido do PDV. */
+  invalid?: boolean;
+  /** quando a restauração foi aplicada; o app reinicia em seguida. */
+  restored?: boolean;
+}
+
+export interface DataClearStockResponse {
+  cleared: boolean;
+}
+
 export interface ScaleStatus {
   connected: boolean;
   portPath: string;
@@ -228,21 +363,42 @@ export interface ScaleStatus {
   lastUpdateAt: string | null;
 }
 
+export interface PrinterStatus {
+  available: boolean;
+  type: "usb" | "network" | "file";
+  address: string;
+}
+
 export interface RendererApi {
   saleCreate: () => Promise<SaleCreateResponse>;
   saleAddItem: (payload: SaleAddItemRequest) => Promise<SaleAddItemResponse>;
   saleRemoveItem: (payload: SaleRemoveItemRequest) => Promise<void>;
+  saleRemoveLastItem: (payload: SaleRemoveLastItemRequest) => Promise<void>;
   saleUpdateItemQuantity: (payload: SaleUpdateItemQuantityRequest) => Promise<SaleAddItemResponse>;
-  saleComplete: (payload: SaleCompleteRequest) => Promise<void>;
+  saleComplete: (payload: SaleCompleteRequest) => Promise<SaleCompleteResponse>;
   saleCancel: (payload: SaleCancelRequest) => Promise<void>;
   productList: () => Promise<Product[]>;
   categoryList: () => Promise<Category[]>;
   productCreate: (payload: ProductCreateRequest) => Promise<ProductCreateResponse>;
   productUpdate: (payload: ProductUpdateRequest) => Promise<void>;
+  productExport: () => Promise<ProductExportResponse>;
+  productImportValidate: () => Promise<ProductImportValidateResponse>;
+  productImportCommit: (
+    payload: ProductImportCommitRequest
+  ) => Promise<ProductImportCommitResponse>;
   paymentCreate: (payload: PaymentCreateRequest) => Promise<PaymentCreateResponse>;
   reportsDashboard: (payload: ReportsDashboardRequest) => Promise<ReportsDashboardResponse>;
   reportsSaleDetail: (payload: { saleId: number }) => Promise<ReportsSaleDetailResponse>;
   reportsReprintReceipt: (payload: { saleId: number }) => Promise<void>;
   scaleGetStatus: () => Promise<ScaleStatus>;
   scaleReadStableWeight: () => Promise<number>;
+  printerGetStatus: () => Promise<PrinterStatus>;
+  settingsGetAll: () => Promise<AppSettings>;
+  settingsUpdate: (payload: SettingsUpdateRequest) => Promise<AppSettings>;
+  listSerialPorts: () => Promise<SerialPortInfo[]>;
+  printerTest: () => Promise<PrinterTestResponse>;
+  printerCheckNetwork: (payload: { address: string }) => Promise<NetworkCheckResponse>;
+  dataBackup: () => Promise<DataBackupResponse>;
+  dataRestore: () => Promise<DataRestoreResponse>;
+  dataClearStock: () => Promise<DataClearStockResponse>;
 }

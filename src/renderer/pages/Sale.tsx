@@ -1,8 +1,42 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import NavBar from "../components/NavBar";
+import { toast } from "sonner";
+import {
+  Banknote,
+  CreditCard,
+  Pencil,
+  Printer,
+  QrCode,
+  RotateCcw,
+  Scale,
+  Search,
+  Trash2,
+  X
+} from "lucide-react";
 import ScrollArea from "../components/ScrollArea";
 import { uiStoreActions, useUiStore } from "../store/uiStore";
-import type { Product, SaleItem } from "../../shared/types";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from "@/components/ui/alert-dialog";
+import type { Product, SaleItem, UnitType } from "../../shared/types";
 
 interface SaleLine {
   saleItemId: number;
@@ -52,6 +86,9 @@ interface PrinterWarningState {
   message: string;
 }
 
+// Quantidade de cards fixos no rail de seleção (atalhos 1-9 e 0).
+const QUICK_CARD_COUNT = 10;
+
 function formatCurrency(value: number): string {
   return new Intl.NumberFormat("pt-BR", {
     style: "currency",
@@ -67,6 +104,37 @@ function formatQuantity(value: number, unitType: Product["unit_type"]): string {
   return new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 }).format(
     value
   );
+}
+
+// Valor monetário — sempre em serifada com dígitos tabulares para alinhar
+// colunas. É o único lugar onde fugimos da fonte sans do sistema.
+function Money({
+  value,
+  className = ""
+}: {
+  value: number;
+  className?: string;
+}): JSX.Element {
+  return (
+    <span
+      className={`font-serif [font-variant-numeric:tabular-nums] ${className}`.trim()}
+    >
+      {formatCurrency(value)}
+    </span>
+  );
+}
+
+// Atalho exibido/ativado por card: 1..9 e 0 para o décimo.
+function shortcutFor(index: number): string {
+  return String((index + 1) % 10);
+}
+
+// Data local no formato ISO (YYYY-MM-DD), como o painel de relatórios espera.
+function toIsoDate(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function createLine(item: SaleItem, product: Product): SaleLine {
@@ -90,7 +158,10 @@ export default function SalePage(): JSX.Element {
     (current) => current.saleSession
   );
   const [products, setProducts] = useState<Product[]>([]);
+  const [mostSoldIds, setMostSoldIds] = useState<number[]>([]);
   const [search, setSearch] = useState("");
+  const [highlight, setHighlight] = useState(0);
+  const [flashIndex, setFlashIndex] = useState<number | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isStartingSale, setIsStartingSale] = useState(false);
   const [isAddingItem, setIsAddingItem] = useState(false);
@@ -129,31 +200,81 @@ export default function SalePage(): JSX.Element {
     saleId: null,
     message: ""
   });
-  const [now, setNow] = useState(new Date());
   const [scaleConnected, setScaleConnected] = useState(false);
   const [scaleStatusLabel, setScaleStatusLabel] = useState(
     "Balança Prix 3 desconectada"
   );
   const [lastScaleWeightKg, setLastScaleWeightKg] = useState(0);
+  const [printerAvailable, setPrinterAvailable] = useState(false);
 
   const startingSaleRef = useRef(false);
   const bootstrappedRef = useRef(false);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
-  const filteredProducts = useMemo(() => {
+  const productUnitById = useMemo(() => {
+    const map = new Map<number, UnitType>();
+    products.forEach((product) => map.set(product.id, product.unit_type));
+    return map;
+  }, [products]);
+
+  // Resultado do rail: busca por nome quando há termo; senão, os mais vendidos
+  // (ordenados pelo relatório) seguidos do resto do catálogo, até 10 slots.
+  const pickerResults = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) {
-      return [];
+    if (term) {
+      return products
+        .filter((product) => product.name.toLowerCase().includes(term))
+        .slice(0, QUICK_CARD_COUNT);
     }
 
-    return products
-      .filter((product) => product.name.toLowerCase().includes(term))
-      .slice(0, 8);
-  }, [products, search]);
+    if (mostSoldIds.length > 0) {
+      const byId = new Map(products.map((product) => [product.id, product]));
+      const ordered = mostSoldIds
+        .map((id) => byId.get(id))
+        .filter((product): product is Product => Boolean(product));
+      const seen = new Set(ordered.map((product) => product.id));
+      const rest = products.filter((product) => !seen.has(product.id));
+      return [...ordered, ...rest].slice(0, QUICK_CARD_COUNT);
+    }
+
+    return products.slice(0, QUICK_CARD_COUNT);
+  }, [products, search, mostSoldIds]);
+
+  const quickCards = useMemo<(Product | null)[]>(
+    () =>
+      Array.from(
+        { length: QUICK_CARD_COUNT },
+        (_, index) => pickerResults[index] ?? null
+      ),
+    [pickerResults]
+  );
+
+  // Ao mudar a busca, volta o destaque para o primeiro resultado.
+  useEffect(() => {
+    setHighlight(0);
+  }, [search]);
 
   const loadProducts = useCallback(async (): Promise<void> => {
     const productRows = await window.api.productList();
     setProducts(productRows);
+  }, []);
+
+  const loadMostSold = useCallback(async (): Promise<void> => {
+    try {
+      const to = new Date();
+      const from = new Date(to);
+      from.setDate(from.getDate() - 90);
+      const dashboard = await window.api.reportsDashboard({
+        fromDate: toIsoDate(from),
+        toDate: toIsoDate(to)
+      });
+      setMostSoldIds(
+        dashboard.top_products_by_quantity.map((entry) => entry.product_id)
+      );
+    } catch {
+      // Sem dados de venda ainda: o rail cai no catálogo em ordem padrão.
+      setMostSoldIds([]);
+    }
   }, []);
 
   const syncScaleStatus = useCallback(async (): Promise<void> => {
@@ -169,6 +290,15 @@ export default function SalePage(): JSX.Element {
     } catch {
       setScaleConnected(false);
       setScaleStatusLabel("Balança Prix 3 desconectada");
+    }
+  }, []);
+
+  const syncPrinterStatus = useCallback(async (): Promise<void> => {
+    try {
+      const status = await window.api.printerGetStatus();
+      setPrinterAvailable(status.available);
+    } catch {
+      setPrinterAvailable(false);
     }
   }, []);
 
@@ -231,6 +361,7 @@ export default function SalePage(): JSX.Element {
     const bootstrap = async (): Promise<void> => {
       try {
         await loadProducts();
+        await loadMostSold();
       } catch (error) {
         setErrorMessage(
           error instanceof Error
@@ -241,12 +372,7 @@ export default function SalePage(): JSX.Element {
     };
 
     void bootstrap();
-  }, [loadProducts, saleId, startNewSale]);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(new Date()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
+  }, [loadMostSold, loadProducts, saleId, startNewSale]);
 
   useEffect(() => {
     void syncScaleStatus();
@@ -256,18 +382,15 @@ export default function SalePage(): JSX.Element {
     return () => window.clearInterval(timer);
   }, [syncScaleStatus]);
 
-  const clockLabel = useMemo(() => {
-    const time = new Intl.DateTimeFormat("pt-BR", {
-      hour: "2-digit",
-      minute: "2-digit"
-    }).format(now);
-    const date = new Intl.DateTimeFormat("pt-BR", {
-      weekday: "short",
-      day: "2-digit",
-      month: "short"
-    }).format(now);
-    return `${time} · ${date.replace(".", "")}`;
-  }, [now]);
+  useEffect(() => {
+    void syncPrinterStatus();
+    // Intervalo mais folgado que a balança: o status da impressora muda
+    // raramente e o healthcheck de rede abre um socket a cada checagem.
+    const timer = window.setInterval(() => {
+      void syncPrinterStatus();
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [syncPrinterStatus]);
 
   const subtotal = useMemo(
     () => saleLines.reduce((acc, line) => acc + line.total, 0),
@@ -347,9 +470,14 @@ export default function SalePage(): JSX.Element {
         change_amount: change,
         status: "confirmed"
       });
-      await window.api.saleComplete({ saleId });
+      const completeResult = await window.api.saleComplete({ saleId });
       uiStoreActions.setSaleStatus("completed");
       setCashModal({ open: false, amountReceived: "", error: null });
+      if (completeResult.printerOffline) {
+        toast.warning(
+          "Impressora offline: venda concluída, comprovante não impresso."
+        );
+      }
     } catch (error) {
       const message =
         error instanceof Error
@@ -468,6 +596,11 @@ export default function SalePage(): JSX.Element {
           setCancelModal({ open: true, error: null });
         }
       }
+
+      if (event.key === "Delete") {
+        event.preventDefault();
+        removeLastSaleLine()
+      }
     };
 
     window.addEventListener("keydown", onKeyDown);
@@ -482,7 +615,11 @@ export default function SalePage(): JSX.Element {
   ]);
 
   const persistAddedItem = useCallback(
-    async (product: Product, quantity: number): Promise<void> => {
+    async (
+      product: Product,
+      quantity: number,
+      options?: { refocusSearch?: boolean }
+    ): Promise<void> => {
       if (saleStatus !== "open") {
         setErrorMessage("Nenhuma venda aberta.");
         return;
@@ -509,7 +646,9 @@ export default function SalePage(): JSX.Element {
         uiStoreActions.upsertSaleLine(line);
 
         setSearch("");
-        searchInputRef.current?.focus();
+        if (options?.refocusSearch ?? true) {
+          searchInputRef.current?.focus();
+        }
       } catch (error) {
         setErrorMessage(
           error instanceof Error ? error.message : "Falha ao adicionar item."
@@ -522,7 +661,7 @@ export default function SalePage(): JSX.Element {
   );
 
   const runScaleRead = useCallback(async (product: Product): Promise<void> => {
-    setScaleStatusLabel("Lendo balança...");
+    setScaleStatusLabel("Lendo balança…");
     setWeightModal({
       open: true,
       product,
@@ -530,6 +669,17 @@ export default function SalePage(): JSX.Element {
       loading: true,
       scaleError: null
     });
+
+    if(!scaleConnected){
+       setWeightModal({
+          open: true,
+          product,
+          weight: "",
+          loading: false,
+          scaleError: "Balança desconectada. Informe o peso manualmente."
+        });
+        return;
+    }
 
     try {
       const weight = await window.api.scaleReadStableWeight();
@@ -556,31 +706,92 @@ export default function SalePage(): JSX.Element {
     }
   }, []);
 
-  const selectProduct = useCallback(
-    (product: Product): void => {
-      if (product.unit_type === "kg") {
-        void runScaleRead(product);
+  // Seleção de produto pelo rail: kg abre a balança; unitário entra direto com
+  // quantidade 1 (o caixa ajusta na linha do carrinho se precisar).
+  const pickProduct = useCallback(
+    async (
+      product: Product,
+      options?: { refocusSearch?: boolean }
+    ): Promise<void> => {
+      if (saleStatus !== "open" || isAddingItem) {
         return;
       }
 
-      setUnitModal({ open: true, product, quantity: "1" });
+      if (product.unit_type === "kg") {
+        await runScaleRead(product);
+        return;
+      }
+
+      await persistAddedItem(product, 1, options);
     },
-    [runScaleRead]
+    [isAddingItem, persistAddedItem, runScaleRead, saleStatus]
   );
 
-  const addFirstSearchResult = useCallback(async (): Promise<void> => {
-    const firstResult = filteredProducts[0];
-    if (!firstResult || isAddingItem) {
-      return;
-    }
+  // Seleção via card/atalho numérico: NÃO devolve o foco à busca, senão o
+  // próximo número digitado cairia no input em vez de acionar outro card.
+  const pickByIndex = useCallback(
+    (index: number, product: Product): void => {
+      setFlashIndex(index);
+      window.setTimeout(
+        () => setFlashIndex((current) => (current === index ? null : current)),
+        220
+      );
+      void pickProduct(product, { refocusSearch: false });
+    },
+    [pickProduct]
+  );
 
-    if (firstResult.unit_type === "kg") {
-      await runScaleRead(firstResult);
-      return;
-    }
+  // Teclas 1-9 e 0 (0 = décimo card) adicionam direto, fora de inputs/modais.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (hasOpenModal) {
+        return;
+      }
+      const element = document.activeElement;
+      if (
+        element instanceof HTMLInputElement ||
+        element instanceof HTMLTextAreaElement
+      ) {
+        return;
+      }
+      if (event.key >= "0" && event.key <= "9") {
+        const index = event.key === "0" ? 9 : Number(event.key) - 1;
+        const product = quickCards[index];
+        if (product) {
+          event.preventDefault();
+          pickByIndex(index, product);
+        }
+      }
+    };
 
-    await persistAddedItem(firstResult, 1);
-  }, [filteredProducts, isAddingItem, persistAddedItem, runScaleRead]);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [hasOpenModal, pickByIndex, quickCards]);
+
+  const onSearchKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLInputElement>): void => {
+      const count = pickerResults.length;
+      if (event.key === "ArrowDown") {
+        if (count > 0) {
+          setHighlight((current) => (current + 1) % count);
+          event.preventDefault();
+        }
+      } else if (event.key === "ArrowUp") {
+        if (count > 0) {
+          setHighlight((current) => (current - 1 + count) % count);
+          event.preventDefault();
+        }
+      } else if (event.key === "Enter") {
+        event.preventDefault();
+        const product = pickerResults[highlight] ?? pickerResults[0];
+        if (product) {
+          setHighlight(0);
+          void pickProduct(product);
+        }
+      }
+    },
+    [highlight, pickProduct, pickerResults]
+  );
 
   const confirmUnitSelection = useCallback(async (): Promise<void> => {
     if (!unitModal.product) {
@@ -604,11 +815,17 @@ export default function SalePage(): JSX.Element {
 
     const quantity = Number(weightModal.weight.replace(",", "."));
     if (!Number.isFinite(quantity) || quantity <= 0) {
-      setErrorMessage("Peso inválido.");
+      setWeightModal(prev => ({
+        ...prev,
+        scaleError: "Peso inválido."
+      }));
       return;
     }
     if (!/^\d+(?:[.,]\d{1,3})?$/.test(weightModal.weight.trim())) {
-      setErrorMessage("Peso deve ter até 3 casas decimais.");
+      setWeightModal(prev => ({
+        ...prev,
+        scaleError: "Peso deve ter até 3 casas decimais."
+      }));
       return;
     }
 
@@ -684,6 +901,29 @@ export default function SalePage(): JSX.Element {
     }
   }, [editModal, products, saleId, saleStatus]);
 
+  // Oferece "Desfazer" após remover: re-adiciona o produto com a mesma
+  // quantidade (gera um novo item de venda, mas restaura o carrinho).
+  const offerUndoRemoval = useCallback(
+    (line: SaleLine): void => {
+      const product = products.find((entry) => entry.id === line.productId);
+      if (!product) {
+        return;
+      }
+      toast("Item removido", {
+        description: line.product,
+        action: {
+          label: "Desfazer",
+          onClick: () => {
+            void persistAddedItem(product, line.quantityValue, {
+              refocusSearch: false
+            });
+          }
+        }
+      });
+    },
+    [persistAddedItem, products]
+  );
+
   const removeSaleLine = useCallback(
     async (line: SaleLine): Promise<void> => {
       if (!saleId || saleStatus !== "open") {
@@ -698,6 +938,7 @@ export default function SalePage(): JSX.Element {
           saleItemId: line.saleItemId
         });
         uiStoreActions.removeSaleLine(line.saleItemId);
+        offerUndoRemoval(line);
       } catch (error) {
         setErrorMessage(
           error instanceof Error ? error.message : "Falha ao remover item."
@@ -706,7 +947,36 @@ export default function SalePage(): JSX.Element {
         setIsUpdatingItem(false);
       }
     },
-    [saleId, saleStatus]
+    [offerUndoRemoval, saleId, saleStatus]
+  );
+
+  const removeLastSaleLine = useCallback(
+    async (): Promise<void> => {
+      if (!saleId || saleStatus !== "open") {
+        return;
+      }
+
+      const lastLine = saleLines[saleLines.length - 1] ?? null;
+
+      setIsUpdatingItem(true);
+      setErrorMessage(null);
+      try {
+        await window.api.saleRemoveLastItem({
+          saleId,
+        });
+        uiStoreActions.removeLastSaleLine();
+        if (lastLine) {
+          offerUndoRemoval(lastLine);
+        }
+      } catch (error) {
+        setErrorMessage(
+          error instanceof Error ? error.message : "Falha ao remover item."
+        );
+      } finally {
+        setIsUpdatingItem(false);
+      }
+    },
+    [offerUndoRemoval, saleId, saleLines, saleStatus]
   );
 
   const openCancelModal = useCallback((): void => {
@@ -760,7 +1030,7 @@ export default function SalePage(): JSX.Element {
     }
     setPrinterWarning((state) => ({
       ...state,
-      message: "Tentando reimprimir..."
+      message: "Tentando reimprimir…"
     }));
     try {
       await window.api.reportsReprintReceipt({ saleId: printerWarning.saleId });
@@ -774,40 +1044,23 @@ export default function SalePage(): JSX.Element {
     }
   }, [printerWarning.saleId]);
 
+  const searching = search.trim().length > 0;
+  const statusLabel =
+    saleStatus === "cancelled"
+      ? "Cancelada"
+      : saleStatus === "completed"
+        ? "Concluída"
+        : "Aberta";
+  const statusColor =
+    saleStatus === "cancelled"
+      ? "text-[#ff6f99]"
+      : saleStatus === "completed"
+        ? "text-[#7dc8ff]"
+        : "text-[#7fd1b6]";
+
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[#111318] text-[#e8e6df]">
-      <div className="flex items-center justify-between border-b border-[#2a2d35] bg-[#1a1d24] px-4 py-2">
-        <nav className="flex items-center gap-2 text-sm">
-          <Link
-            to="/"
-            className="rounded-md bg-[#22262f] px-3 py-1.5 text-[#e8e6df]"
-          >
-            Venda{" "}
-            <span className="ml-2 rounded border border-[#343945] bg-[#0f131f] px-1.5 py-0.5 text-xs">
-              F1
-            </span>
-          </Link>
-          <Link
-            to="/catalog"
-            className="rounded-md px-3 py-1.5 text-[#c2c0b6] hover:bg-[#22262f] hover:text-[#e8e6df]"
-          >
-            Produtos{" "}
-            <span className="ml-2 rounded border border-[#343945] bg-[#0f131f] px-1.5 py-0.5 text-xs">
-              F6
-            </span>
-          </Link>
-          <Link
-            to="/reports"
-            className="rounded-md px-3 py-1.5 text-[#c2c0b6] hover:bg-[#22262f] hover:text-[#e8e6df]"
-          >
-            Relatórios{" "}
-            <span className="ml-2 rounded border border-[#343945] bg-[#0f131f] px-1.5 py-0.5 text-xs">
-              F7
-            </span>
-          </Link>
-        </nav>
-        <span className="text-sm text-[#9d9c99]">{clockLabel}</span>
-      </div>
+      <NavBar />
 
       {errorMessage ? (
         <div className="border-b border-[#3c1e24] bg-[#2b1519] px-4 py-2 text-sm text-[#ff8d8d]">
@@ -815,227 +1068,307 @@ export default function SalePage(): JSX.Element {
         </div>
       ) : null}
 
-      <div className="grid min-h-0 flex-1 grid-cols-[1fr_320px]">
-        <section className="relative grid min-h-0 grid-rows-[auto_auto_1fr_auto] border-r border-[#2a2d35]">
-          <div className="border-b border-[#2a2d35] bg-[#0f131f] px-4 py-3">
-            <div className="flex items-center gap-3">
-              <input
-                ref={searchInputRef}
-                value={search}
-                disabled={saleStatus !== "open"}
-                onChange={(event) => setSearch(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    void addFirstSearchResult();
-                  }
-                }}
-                placeholder="Buscar produto por nome..."
-                className="w-full rounded-lg border border-[#1D9E75] bg-[#22262f] px-4 py-2 text-base text-[#e8e6df] outline-none placeholder:text-[#8d8c89] focus:border-[#2ad6a2] disabled:cursor-not-allowed disabled:border-[#353846] disabled:text-[#6f706c]"
-              />
-              <span className="rounded border border-[#2d3240] bg-[#111522] px-2 py-1 text-xs text-[#8b8d95]">
-                F2
-              </span>
-            </div>
+      <div className="grid min-h-0 flex-1 grid-cols-[1fr_3fr]">
+        {/* Rail de seleção — 25% */}
+        <section className="flex min-h-0 flex-col gap-3 border-r border-[#2a2d35] bg-[#0f131f] p-4">
+          <div className="relative flex items-center">
+            <Search className="pointer-events-none absolute left-3 size-4 text-muted-foreground" />
+            <Input
+              ref={searchInputRef}
+              value={search}
+              disabled={saleStatus !== "open"}
+              onChange={(event) => setSearch(event.target.value)}
+              onKeyDown={onSearchKeyDown}
+              placeholder="Buscar produto ou código…"
+              className="h-12 border-primary pl-10 pr-12 text-base"
+            />
+            <span className="pointer-events-none absolute right-3 rounded border border-border bg-background px-2 py-1 text-xs text-muted-foreground">
+              F2
+            </span>
           </div>
 
-          {saleStatus === "open" && filteredProducts.length > 0 ? (
-            <div className="absolute left-4 right-4 top-[58px] z-20 max-h-56 overflow-y-auto rounded-lg border border-[#2a2d35] bg-[#1a1d24] shadow-2xl">
-              {filteredProducts.map((product) => (
+          <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+            {searching ? `Resultados (${pickerResults.length})` : "Mais vendidos"}
+          </p>
+
+          <ScrollArea className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto pr-1">
+            {quickCards.map((product, index) => {
+              const isFlash = flashIndex === index;
+              const isHighlighted =
+                Boolean(product) && searching && index === highlight;
+
+              if (!product) {
+                return (
+                  <div
+                    key={index}
+                    className="mb-2 flex min-h-[56px] items-center gap-3 rounded-lg border border-dashed border-[#242832] px-3 text-[#3a3e49]"
+                  >
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center text-sm font-semibold">
+                      {shortcutFor(index)}
+                    </span>
+                  </div>
+                );
+              }
+
+              return (
                 <button
-                  key={product.id}
-                  onClick={() => selectProduct(product)}
-                  className="flex w-full items-center justify-between border-b border-[#252a34] px-3 py-2 text-left last:border-b-0 hover:bg-[#22262f]"
+                  key={index}
+                  onClick={() => pickByIndex(index, product)}
+                  disabled={saleStatus !== "open"}
+                  className={`mb-2 flex min-h-[50px] items-center gap-3 rounded-lg border px-3 py-2 text-left transition-[transform,background-color,border-color,box-shadow] duration-150 disabled:cursor-not-allowed disabled:opacity-50 ${
+                    isFlash
+                      ? "scale-[1.02] border-[#2ad6a2] bg-[#1f4638] ring-2 ring-[#2ad6a2]"
+                      : isHighlighted
+                        ? "border-[#2ad6a2] bg-[#183028] ring-2 ring-[#2ad6a2]"
+                        : "border-[#2a2d35] bg-[#22262f] hover:border-[#3a5f52] hover:bg-[#262b36]"
+                  }`}
                 >
-                  <span className="text-sm text-[#e8e6df]">{product.name}</span>
-                  <span className="text-xs text-[#9ea097]">
-                    {product.unit_type === "kg" ? "kg" : "unidade"} ·{" "}
-                    {formatCurrency(product.price_per_unit)}
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[#101521] text-sm font-semibold text-[#8b8d95]">
+                    {shortcutFor(index)}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-md font-medium text-[#e8e6df]">
+                    {product.name}
+                  </span>
+                  <span className="shrink-0 text-sm text-[#c2c0b6]">
+                    <Money value={product.price_per_unit} />
+                    <span className="text-[#7f807c]">
+                      /{product.unit_type === "kg" ? "kg" : "un"}
+                    </span>
                   </span>
                 </button>
-              ))}
-            </div>
-          ) : null}
+              );
+            })}
+          </ScrollArea>
 
-          <div className="grid grid-cols-[1fr_110px_130px_130px_100px] border-b border-[#2a2d35] px-4 py-2 text-xs uppercase tracking-wide text-[#8f8e8b]">
+          <div className="flex items-center justify-between border-t border-[#2a2d35] pt-3 text-xs">
+            <span className="flex items-center gap-4 text-[#7f807c]">
+              <span className="flex items-center">
+                <span
+                  className={`mr-2 inline-block h-2 w-2 rounded-full ${scaleConnected ? "bg-[#00b386]" : "bg-[#ff6f99]"}`}
+                />
+                {scaleStatusLabel}
+              </span>
+              <span className="flex items-center">
+                <span
+                  className={`mr-2 inline-block h-2 w-2 rounded-full ${printerAvailable ? "bg-[#00b386]" : "bg-[#ff6f99]"}`}
+                />
+                {printerAvailable
+                  ? "Impressora conectada"
+                  : "Impressora desconectada"}
+              </span>
+            </span>
+            <span className="font-medium text-[#00b4a1]">
+              {lastScaleWeightKg.toFixed(3).replace(".", ",")} kg
+            </span>
+          </div>
+        </section>
+
+        {/* Painel de venda — 75% */}
+        <aside className="grid min-h-0 grid-rows-[auto_auto_1fr_auto] bg-[#12161f]">
+          <div className="flex items-center justify-between border-b border-[#2a2d35] px-6 py-3">
+            <div className="flex items-baseline gap-3">
+              <span className="text-sm text-[#c2c0b6]">
+                Venda #{saleId ? String(saleId).padStart(4, "0") : "----"}
+              </span>
+              <span className={`text-xs font-medium ${statusColor}`}>
+                {statusLabel}
+              </span>
+            </div>
+            <span className="text-xs text-[#8d8c89]">
+              Desconto <span className="text-[#f4ae2f]">− {formatCurrency(0)}</span>
+            </span>
+          </div>
+
+          <div className="grid grid-cols-[1fr_150px_120px_150px_92px] items-baseline border-b border-[#2a2d35] px-6 py-2.5 text-[11px] font-medium uppercase tracking-[0.12em] text-[#8f8e8b]">
             <span>Produto</span>
+            <span className="text-right">Preço un.</span>
             <span className="text-center">Qtd</span>
-            <span className="text-center">Preço un.</span>
-            <span className="text-center">Total</span>
+            <span className="text-right">Subtotal</span>
             <span />
           </div>
 
           <ScrollArea className="min-h-0 overflow-y-auto">
             {saleLines.length === 0 ? (
-              <div className="px-4 py-8 text-sm text-[#7f807c]">
-                Venda aberta. Pesquise um produto para adicionar.
+              <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+                <p className="text-sm text-[#7f807c]">
+                  Venda aberta. Selecione um produto para adicionar.
+                </p>
+                <p className="text-xs text-[#5b5c58]">
+                  Use as teclas 1-9 e 0, ou busque com F2.
+                </p>
               </div>
             ) : (
               saleLines.map((line) => (
                 <div
                   key={line.saleItemId}
-                  className="grid grid-cols-[1fr_110px_130px_130px_100px] items-center border-b border-[#232732] px-4 py-3"
+                  className="grid grid-cols-[1fr_150px_120px_150px_92px] items-center border-b border-[#1e222c] px-6 py-3 transition-colors hover:bg-[#141924]"
                 >
-                  <div className="min-w-0">
-                    <p className="truncate text-base font-medium text-[#e8e6df]">
-                      {line.product}
-                    </p>
-                    <p className="truncate text-sm text-[#8c8b88]">
-                      {line.detail}
-                    </p>
-                  </div>
-                  <p className="text-center text-sm text-[#d4d3cf]">
+                  <p className="min-w-0 truncate text-[15px] font-medium text-[#e8e6df]">
+                    {line.product}
+                  </p>
+                  <span className="text-right text-sm text-[#c2c0b6]">
+                    <Money value={line.unitPrice} />
+                    <span className="text-[#7f807c]">
+                      /{productUnitById.get(line.productId) === "kg" ? "kg" : "un"}
+                    </span>
+                  </span>
+                  <span className="text-center text-sm tabular-nums text-[#d4d3cf]">
                     {line.quantityLabel}
-                  </p>
-                  <p className="text-center text-sm text-[#d4d3cf]">
-                    {formatCurrency(line.unitPrice)}
-                  </p>
-                  <p className="text-center text-sm font-medium text-[#d4d3cf]">
-                    {formatCurrency(line.total)}
-                  </p>
+                  </span>
+                  <Money
+                    value={line.total}
+                    className="text-right text-[15px] text-[#e8e6df]"
+                  />
                   <div className="flex items-center justify-end gap-1.5">
-                    <button
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      aria-label={`Editar quantidade de ${line.product}`}
                       onClick={() => openEditModal(line)}
                       disabled={saleStatus !== "open"}
-                      className="rounded border border-[#303543] bg-[#202532] px-2 py-1 text-xs text-[#9ca1ab] disabled:cursor-not-allowed disabled:opacity-50"
+                      className="size-8 text-muted-foreground hover:text-foreground"
                     >
-                      E
-                    </button>
-                    <button
+                      <Pencil className="size-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      aria-label={`Remover ${line.product}`}
                       onClick={() => void removeSaleLine(line)}
                       disabled={saleStatus !== "open"}
-                      className="rounded border border-[#303543] bg-[#202532] px-2 py-1 text-xs text-[#9ca1ab] disabled:cursor-not-allowed disabled:opacity-50"
+                      className="size-8 text-muted-foreground hover:border-danger-dark hover:text-error-text"
                     >
-                      Del
-                    </button>
+                      <Trash2 className="size-4" />
+                    </Button>
                   </div>
                 </div>
               ))
             )}
           </ScrollArea>
 
-          <footer className="flex items-center justify-between border-t border-[#2a2d35] bg-[#1a1d24] px-4 py-2 text-sm">
-            <p className="text-[#7f807c]">
-              <span
-                className={`mr-2 inline-block h-2 w-2 rounded-full ${scaleConnected ? "bg-[#00b386]" : "bg-[#ff6f99]"}`}
+          <div className="border-t border-[#2a2d35] bg-[#0f131d]">
+            <div className="flex items-end justify-between px-6 py-5">
+              <div>
+                <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-[#8f8e8b]">
+                  Total
+                </p>
+                <p className="mt-0.5 text-xs text-[#6b6a65]">
+                  {saleLines.length}{" "}
+                  {saleLines.length === 1 ? "produto" : "produtos"} ·{" "}
+                  {unitCount.toLocaleString("pt-BR")}{" "}
+                  {unitCount === 1 ? "item" : "itens"}
+                </p>
+              </div>
+              <Money
+                value={subtotal}
+                className="text-5xl font-medium leading-none text-[#f3f1eb]"
               />
-              {scaleStatusLabel}
-            </p>
-            <p className="font-medium text-[#00b4a1]">
-              {lastScaleWeightKg.toFixed(3).replace(".", ",")} kg
-            </p>
-          </footer>
-        </section>
+            </div>
 
-        <aside className="grid min-h-0 grid-rows-[auto_auto_1fr_auto] bg-[#1a1d24]">
-          <div className="space-y-2 border-b border-[#2a2d35] px-4 py-4">
-            <p className="text-sm text-[#9c9b97]">
-              Venda #{saleId ? String(saleId).padStart(4, "0") : "----"}
-            </p>
-            <p
-              className={`text-xs font-medium ${
-                saleStatus === "cancelled"
-                  ? "text-[#ff6f99]"
-                  : saleStatus === "completed"
-                    ? "text-[#7dc8ff]"
-                    : "text-[#7fd1b6]"
-              }`}
-            >
-              {saleStatus === "cancelled"
-                ? "Cancelada"
-                : saleStatus === "completed"
-                  ? "Concluída"
-                  : "Aberta"}
-            </p>
-            <p className="text-sm text-[#8e8d8a]">Total</p>
-            <p className="text-4xl font-medium leading-none text-[#f3f1eb]">
-              {formatCurrency(subtotal)}
-            </p>
-            <p className="text-sm text-[#8f8e8b]">
-              {saleLines.length} itens · {unitCount.toLocaleString("pt-BR")}{" "}
-              unidades
-            </p>
-            <p className="text-xs text-[#6b6a65]">
-              {products.length} produtos carregados
-            </p>
-          </div>
+            <div className="grid grid-cols-3 gap-2.5 px-6">
+              <button
+                onClick={openCashModal}
+                disabled={!saleId || saleStatus !== "open"}
+                className="flex flex-col items-start rounded-lg bg-[#11ad7d] px-4 py-3.5 text-sm font-semibold text-[#063f2d] transition-colors hover:bg-[#14c48e] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <span className="flex items-center gap-2">
+                  <Banknote className="size-4" />
+                  Dinheiro
+                </span>
+                <span className="mt-0.5 text-xs font-normal opacity-70">F3</span>
+              </button>
+              <button
+                type="button"
+                disabled
+                aria-label="PIX (em breve)"
+                className="flex cursor-not-allowed flex-col items-start rounded-lg border border-warning/40 bg-[#2d2612]/50 px-4 py-3.5 text-sm font-medium text-warning/60"
+              >
+                <span className="flex items-center gap-2">
+                  <QrCode className="size-4" />
+                  PIX
+                </span>
+                <span className="mt-0.5 text-[11px] uppercase tracking-wide opacity-80">
+                  Em breve
+                </span>
+              </button>
+              <button
+                type="button"
+                disabled
+                aria-label="Cartão Point (em breve)"
+                className="flex cursor-not-allowed flex-col items-start rounded-lg border border-info/40 bg-[#0e2337]/50 px-4 py-3.5 text-sm font-medium text-info/60"
+              >
+                <span className="flex items-center gap-2">
+                  <CreditCard className="size-4" />
+                  Cartão (Point)
+                </span>
+                <span className="mt-0.5 text-[11px] uppercase tracking-wide opacity-80">
+                  Em breve
+                </span>
+              </button>
+            </div>
 
-          <div className="flex items-center justify-between border-b border-[#2a2d35] px-4 py-3 text-sm">
-            <span className="text-[#8d8c89]">Desconto</span>
-            <span className="text-[#f4ae2f]">− {formatCurrency(0)}</span>
-          </div>
-
-          <div className="space-y-3 px-4 py-4">
-            <p className="text-xs uppercase tracking-wide text-[#888784]">
-              Forma de pagamento
-            </p>
-            <button
-              onClick={openCashModal}
-              disabled={!saleId || saleStatus !== "open"}
-              className="flex w-full items-center justify-between rounded-lg bg-[#11ad7d] px-4 py-3 text-sm font-medium text-[#063f2d] disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <span>Dinheiro</span>
-              <span className="rounded bg-[#101521] px-1.5 py-0.5 text-xs text-[#7f838a]">
-                F3
-              </span>
-            </button>
-            <button className="flex w-full items-center justify-between rounded-lg border border-[#EF9F27] bg-[#2d2612] px-4 py-3 text-sm font-medium text-[#efab2d]">
-              <span>PIX</span>
-              <span className="rounded bg-[#101521] px-1.5 py-0.5 text-xs text-[#7f838a]">
-                F4
-              </span>
-            </button>
-            <button className="flex w-full items-center justify-between rounded-lg border border-[#378ADD] bg-[#0e2337] px-4 py-3 text-sm font-medium text-[#66b1ff]">
-              <span>Cartão (Point)</span>
-              <span className="rounded bg-[#101521] px-1.5 py-0.5 text-xs text-[#7f838a]">
-                F5
-              </span>
-            </button>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3 border-t border-[#2a2d35] px-4 py-4">
-            <button
-              onClick={() => void startNewSale()}
-              disabled={isStartingSale || isCurrentSaleEmpty}
-              className="rounded-lg bg-[#222834] px-3 py-3 text-left text-sm font-medium text-[#d2d2cf] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Nova venda{" "}
-              <span className="ml-2 rounded bg-[#101521] px-1.5 py-0.5 text-xs text-[#7f838a]">
-                F1
-              </span>
-            </button>
-            <button
-              onClick={openCancelModal}
-              disabled={!saleId || saleStatus !== "open" || isCancellingSale}
-              className="rounded-lg border border-[#ff0059] bg-[#2a0714] px-3 py-3 text-left text-sm font-medium text-[#ff4f8a] disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Cancelar{" "}
-              <span className="ml-2 rounded bg-[#101521] px-1.5 py-0.5 text-xs text-[#7f838a]">
-                Esc
-              </span>
-            </button>
+            <div className="grid grid-cols-2 gap-2.5 px-6 py-4">
+              <Button
+                variant="secondary"
+                onClick={() => void startNewSale()}
+                disabled={isStartingSale || isCurrentSaleEmpty}
+                className="h-auto py-3"
+              >
+                <RotateCcw className="size-4" />
+                Nova venda
+                <span className="ml-1 rounded bg-background px-1.5 py-0.5 text-xs text-muted-foreground">
+                  F1
+                </span>
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={openCancelModal}
+                disabled={!saleId || saleStatus !== "open" || isCancellingSale}
+                className="h-auto py-3"
+              >
+                <X className="size-4" />
+                Cancelar
+                <span className="ml-1 rounded bg-background px-1.5 py-0.5 text-xs text-muted-foreground">
+                  Esc
+                </span>
+              </Button>
+            </div>
           </div>
         </aside>
       </div>
 
-      {cashModal.open ? (
-        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-sm rounded-xl border border-[#2a2d35] bg-[#1a1d24] p-4">
-            <h2 className="text-lg font-medium">Pagamento em dinheiro</h2>
-            <p className="mt-1 text-sm text-[#9ea097]">
-              Total da venda: {formatCurrency(subtotal)}
-            </p>
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                void confirmCashPayment();
-              }}
-            >
-              <label className="mt-4 block text-sm text-[#9ea097]">
-                Valor recebido
-              </label>
-              <input
+      <Dialog
+        open={cashModal.open}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCashModal({ open: false, amountReceived: "", error: null });
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Banknote className="size-5 text-primary" />
+              Pagamento em dinheiro
+            </DialogTitle>
+            <DialogDescription>
+              Total da venda:{" "}
+              <Money value={subtotal} className="text-foreground" />
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="flex flex-col gap-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void confirmCashPayment();
+            }}
+          >
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="cash-amount">Valor recebido</Label>
+              <Input
+                id="cash-amount"
                 autoFocus
+                inputMode="decimal"
                 value={cashModal.amountReceived}
                 onChange={(event) =>
                   setCashModal((state) => ({
@@ -1043,61 +1376,72 @@ export default function SalePage(): JSX.Element {
                     amountReceived: event.target.value
                   }))
                 }
-                className="mt-1 w-full rounded-md border border-[#2a2d35] bg-[#22262f] px-3 py-2 text-sm outline-none focus:border-[#1D9E75]"
+                className="font-serif text-lg [font-variant-numeric:tabular-nums]"
               />
-              <p
-                className={`mt-2 text-sm ${changeAmount < 0 ? "text-[#ff8d8d]" : "text-[#7fd1b6]"}`}
-              >
-                Troco:{" "}
+            </div>
+            <p
+              className={`text-sm ${changeAmount < 0 ? "text-error-text" : "text-success-text"}`}
+            >
+              Troco:{" "}
+              <span className="font-serif [font-variant-numeric:tabular-nums]">
                 {changeAmount >= 0
                   ? formatCurrency(changeAmount)
                   : `-${formatCurrency(Math.abs(changeAmount))}`}
-              </p>
-              {cashModal.error ? (
-                <p className="mt-2 text-sm text-[#ff8d8d]">{cashModal.error}</p>
-              ) : null}
-              <div className="mt-4 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setCashModal({
-                      open: false,
-                      amountReceived: "",
-                      error: null
-                    })
-                  }
-                  className="rounded-md border border-[#3a3f4d] px-3 py-1.5 text-sm"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={isCashConfirmDisabled}
-                  className="rounded-md bg-[#1D9E75] px-3 py-1.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Confirmar pagamento
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      ) : null}
-
-      {unitModal.open && unitModal.product ? (
-        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-sm rounded-xl border border-[#2a2d35] bg-[#1a1d24] p-4">
-            <h2 className="text-lg font-medium">Quantidade</h2>
-            <p className="mt-1 text-sm text-[#9ea097]">
-              {unitModal.product.name}
+              </span>
             </p>
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                void confirmUnitSelection();
-              }}
-            >
-              <input
+            {cashModal.error ? (
+              <p role="alert" className="text-sm text-error-text">
+                {cashModal.error}
+              </p>
+            ) : null}
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() =>
+                  setCashModal({
+                    open: false,
+                    amountReceived: "",
+                    error: null
+                  })
+                }
+              >
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={isCashConfirmDisabled}>
+                Confirmar pagamento
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={unitModal.open && unitModal.product !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setUnitModal({ open: false, product: null, quantity: "1" });
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Quantidade</DialogTitle>
+            <DialogDescription>{unitModal.product?.name}</DialogDescription>
+          </DialogHeader>
+          <form
+            className="flex flex-col gap-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void confirmUnitSelection();
+            }}
+          >
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="unit-quantity">Quantidade (un)</Label>
+              <Input
+                id="unit-quantity"
                 autoFocus
+                inputMode="numeric"
                 value={unitModal.quantity}
                 onChange={(event) =>
                   setUnitModal((state) => ({
@@ -1105,46 +1449,54 @@ export default function SalePage(): JSX.Element {
                     quantity: event.target.value
                   }))
                 }
-                className="mt-4 w-full rounded-md border border-[#2a2d35] bg-[#22262f] px-3 py-2 text-sm outline-none focus:border-[#1D9E75]"
+                className="font-serif text-lg [font-variant-numeric:tabular-nums]"
               />
-              <div className="mt-4 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setUnitModal({ open: false, product: null, quantity: "1" })
-                  }
-                  className="rounded-md border border-[#3a3f4d] px-3 py-1.5 text-sm"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={isAddingItem}
-                  className="rounded-md bg-[#1D9E75] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
-                >
-                  Confirmar
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      ) : null}
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() =>
+                  setUnitModal({ open: false, product: null, quantity: "1" })
+                }
+              >
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={isAddingItem}>
+                Confirmar
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
-      {editModal.open && editModal.line ? (
-        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-sm rounded-xl border border-[#2a2d35] bg-[#1a1d24] p-4">
-            <h2 className="text-lg font-medium">Editar quantidade</h2>
-            <p className="mt-1 text-sm text-[#9ea097]">
-              {editModal.line.product}
-            </p>
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                void confirmEditSelection();
-              }}
-            >
-              <input
+      <Dialog
+        open={editModal.open && editModal.line !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditModal({ open: false, line: null, quantity: "" });
+            setEditModalError(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Editar quantidade</DialogTitle>
+            <DialogDescription>{editModal.line?.product}</DialogDescription>
+          </DialogHeader>
+          <form
+            className="flex flex-col gap-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void confirmEditSelection();
+            }}
+          >
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="edit-quantity">Nova quantidade</Label>
+              <Input
+                id="edit-quantity"
                 autoFocus
+                inputMode="decimal"
                 value={editModal.quantity}
                 onChange={(event) =>
                   setEditModal((state) => ({
@@ -1152,59 +1504,73 @@ export default function SalePage(): JSX.Element {
                     quantity: event.target.value
                   }))
                 }
-                className="mt-4 w-full rounded-md border border-[#2a2d35] bg-[#22262f] px-3 py-2 text-sm outline-none focus:border-[#1D9E75]"
+                className="font-serif text-lg [font-variant-numeric:tabular-nums]"
               />
-              {editModalError ? (
-                <p className="mt-2 text-sm text-[#ff8d8d]">{editModalError}</p>
-              ) : null}
-              <div className="mt-4 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditModal({ open: false, line: null, quantity: "" });
-                    setEditModalError(null);
-                  }}
-                  className="rounded-md border border-[#3a3f4d] px-3 py-1.5 text-sm"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={isUpdatingItem}
-                  className="rounded-md bg-[#1D9E75] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
-                >
-                  Confirmar
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      ) : null}
+            </div>
+            {editModalError ? (
+              <p role="alert" className="text-sm text-error-text">
+                {editModalError}
+              </p>
+            ) : null}
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setEditModal({ open: false, line: null, quantity: "" });
+                  setEditModalError(null);
+                }}
+              >
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={isUpdatingItem}>
+                Confirmar
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
-      {weightModal.open && weightModal.product ? (
-        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-xl border border-[#2a2d35] bg-[#1a1d24] p-4">
-            <h2 className="text-lg font-medium">Peso do produto</h2>
-            <p className="mt-1 text-sm text-[#9ea097]">
-              {weightModal.product.name}
+      <Dialog
+        open={weightModal.open && weightModal.product !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setWeightModal({
+              open: false,
+              product: null,
+              weight: "",
+              loading: false,
+              scaleError: null
+            });
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Scale className="size-5 text-primary" />
+              Peso do produto
+            </DialogTitle>
+            <DialogDescription>{weightModal.product?.name}</DialogDescription>
+          </DialogHeader>
+
+          {weightModal.loading ? (
+            <p className="text-sm text-text-secondary">
+              Lendo peso estável da balança…
             </p>
+          ) : null}
+          {weightModal.scaleError ? (
+            <p role="alert" className="text-sm text-error-text">
+              {weightModal.scaleError}
+            </p>
+          ) : null}
 
-            {weightModal.loading ? (
-              <p className="mt-4 text-sm text-[#c2c0b6]">
-                Lendo peso estável da balança...
-              </p>
-            ) : null}
-            {weightModal.scaleError ? (
-              <p className="mt-4 text-sm text-[#ff8d8d]">
-                {weightModal.scaleError}
-              </p>
-            ) : null}
-
-            <label className="mt-4 block text-sm text-[#9ea097]">
-              Peso (kg)
-            </label>
-            <input
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="weight-value">Peso (kg)</Label>
+            <Input
+              id="weight-value"
               autoFocus
+              inputMode="decimal"
               value={weightModal.weight}
               onChange={(event) =>
                 setWeightModal((state) => ({
@@ -1222,124 +1588,134 @@ export default function SalePage(): JSX.Element {
                   void confirmWeightSelection();
                 }
               }}
-              className="mt-1 w-full rounded-md border border-[#2a2d35] bg-[#22262f] px-3 py-2 text-sm outline-none focus:border-[#1D9E75]"
+              className="font-serif text-lg [font-variant-numeric:tabular-nums]"
             />
-
-            <div className="mt-4 flex justify-between gap-2">
-              <button
-                onClick={() => {
-                  if (weightModal.product) {
-                    void runScaleRead(weightModal.product);
-                  }
-                }}
-                className="rounded-md border border-[#378ADD] px-3 py-1.5 text-sm text-[#66b1ff]"
-              >
-                Re-ler balança
-              </button>
-
-              <div className="flex gap-2">
-                <button
-                  onClick={() =>
-                    setWeightModal({
-                      open: false,
-                      product: null,
-                      weight: "",
-                      loading: false,
-                      scaleError: null
-                    })
-                  }
-                  className="rounded-md border border-[#3a3f4d] px-3 py-1.5 text-sm"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={() => void confirmWeightSelection()}
-                  disabled={isAddingItem || weightModal.loading}
-                  className="rounded-md bg-[#1D9E75] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
-                >
-                  Confirmar
-                </button>
-              </div>
-            </div>
           </div>
-        </div>
-      ) : null}
 
-      {cancelModal.open ? (
-        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-sm rounded-xl border border-[#2a2d35] bg-[#1a1d24] p-4">
-            <h2 className="text-lg font-medium text-[#ff8cad]">
+          <DialogFooter className="justify-between">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                if (weightModal.product) {
+                  void runScaleRead(weightModal.product);
+                }
+              }}
+              className="text-info"
+            >
+              <RotateCcw className="size-4" />
+              Re-ler balança
+            </Button>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() =>
+                  setWeightModal({
+                    open: false,
+                    product: null,
+                    weight: "",
+                    loading: false,
+                    scaleError: null
+                  })
+                }
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                onClick={() => void confirmWeightSelection()}
+                disabled={isAddingItem || weightModal.loading}
+              >
+                Confirmar
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog
+        open={cancelModal.open}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCancelModal({ open: false, error: null });
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-cancelled-text">
               Cancelar venda
-            </h2>
-            <p className="mt-2 text-sm text-[#c2c0b6]">
-              Tem certeza que deseja cancelar esta venda? Esta ação define o
-              status como <strong>cancelled</strong> e não exclui o registro.
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja cancelar esta venda? A venda é marcada como
+              cancelada e o registro é mantido.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {cancelModal.error ? (
+            <p role="alert" className="text-sm text-error-text">
+              {cancelModal.error}
             </p>
-            {cancelModal.error ? (
-              <p className="mt-3 text-sm text-[#ff8d8d]">{cancelModal.error}</p>
-            ) : null}
-            <form
-              className="mt-4 flex justify-end gap-2"
-              onSubmit={(event) => {
+          ) : null}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isCancellingSale}>
+              Voltar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isCancellingSale}
+              onClick={(event) => {
                 event.preventDefault();
                 void confirmCancelSale();
               }}
+              className="border border-danger-dark bg-[#1f1215] text-error-text hover:bg-[#2a181c]"
             >
-              <button
-                type="button"
-                onClick={() => setCancelModal({ open: false, error: null })}
-                className="rounded-md border border-[#3a3f4d] px-3 py-1.5 text-sm"
-              >
-                Voltar
-              </button>
-              <button
-                type="submit"
-                disabled={isCancellingSale}
-                className="rounded-md border border-[#ff0059] bg-[#2a0714] px-3 py-1.5 text-sm font-medium text-[#ff4f8a] disabled:opacity-60"
-              >
-                Confirmar cancelamento
-              </button>
-            </form>
-          </div>
-        </div>
-      ) : null}
+              Confirmar cancelamento
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
-      {printerWarning.open ? (
-        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-sm rounded-xl border border-border bg-panel p-4">
-            <h2 className="text-lg font-medium text-warning">
+      <Dialog
+        open={printerWarning.open}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPrinterWarning({ open: false, saleId: null, message: "" });
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-warning">
+              <Printer className="size-5" />
               Impressora offline
-            </h2>
-            <p className="mt-2 text-sm text-text-secondary">
+            </DialogTitle>
+            <DialogDescription>
               A venda foi concluída com sucesso, mas o comprovante não foi
               impresso.
+            </DialogDescription>
+          </DialogHeader>
+          {printerWarning.message ? (
+            <p className="rounded-lg bg-surface p-2 text-sm text-error-text">
+              {printerWarning.message}
             </p>
-            {printerWarning.message ? (
-              <p className="mt-3 rounded-lg bg-surface p-2 text-sm text-error-text">
-                {printerWarning.message}
-              </p>
-            ) : null}
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() =>
-                  setPrinterWarning({ open: false, saleId: null, message: "" })
-                }
-                className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-text-secondary"
-              >
-                Fechar
-              </button>
-              <button
-                type="button"
-                onClick={() => void retryPrinter()}
-                className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-white"
-              >
-                Reimprimir comprovante
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+          ) : null}
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() =>
+                setPrinterWarning({ open: false, saleId: null, message: "" })
+              }
+            >
+              Fechar
+            </Button>
+            <Button type="button" onClick={() => void retryPrinter()}>
+              <Printer className="size-4" />
+              Reimprimir comprovante
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

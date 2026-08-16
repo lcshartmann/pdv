@@ -1,8 +1,10 @@
 import { useEffect } from "react";
 import { HashRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { Toaster } from "sonner";
 import CatalogPage from "./pages/Catalog";
 import ReportsPage from "./pages/Reports";
 import SalePage from "./pages/Sale";
+import SettingsPage from "./pages/Settings";
 
 function KeyboardPageNavigation(): null {
   const navigate = useNavigate();
@@ -42,13 +44,15 @@ function KeyboardPageNavigation(): null {
 export default function App(): JSX.Element {
   return (
     <HashRouter>
-      <div className="h-screen overflow-hidden bg-[#111318] text-[#e8e6df]">
+      <div className="h-screen overflow-hidden bg-background text-foreground">
         <KeyboardPageNavigation />
         <Routes>
           <Route path="/" element={<SalePage />} />
           <Route path="/catalog" element={<CatalogPage />} />
           <Route path="/reports" element={<ReportsPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
         </Routes>
+        <Toaster theme="dark" position="top-right" richColors closeButton />
       </div>
     </HashRouter>
   );

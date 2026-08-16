@@ -239,14 +239,21 @@ console.log("Running PrinterService tests...\n");
 testDb = new Database(":memory:");
 testDb.exec(mockSchema);
 seedTestData();
-process.env.MARKET_POS_PRINTER_TYPE = "usb";
-process.env.MARKET_POS_PRINTER_ADDRESS = "";
-process.env.MARKET_POS_STORE_NAME = "Mercado Teste";
+const testPrinterConfig = () => ({
+  type: "usb" as const,
+  address: "",
+  storeName: "Mercado Teste",
+  receiptFooter: "Obrigado pela preferência!\nVolte sempre!",
+  receiptShowQr: true,
+  storeCnpj: "",
+  storeAddress: "",
+  storePhone: ""
+});
 
 PrinterServiceCtor = require("./printer").PrinterService;
 
 test("imprime comprovante com itens, totais, pagamento e troco", async () => {
-  const service = new PrinterServiceCtor();
+  const service = new PrinterServiceCtor(testPrinterConfig);
   const sale = testDb.prepare("SELECT id FROM sale WHERE status = 'completed'").get() as { id: number };
 
   const texts: string[] = [];
@@ -271,7 +278,7 @@ test("imprime comprovante com itens, totais, pagamento e troco", async () => {
 });
 
 test("gera QR Code no comprovante", async () => {
-  const service = new PrinterServiceCtor();
+  const service = new PrinterServiceCtor(testPrinterConfig);
   const sale = testDb.prepare("SELECT id FROM sale WHERE status = 'completed'").get() as { id: number };
 
   let qrContent = "";
@@ -290,7 +297,7 @@ test("gera QR Code no comprovante", async () => {
 });
 
 test("envia comando de corte de papel após a impressão", async () => {
-  const service = new PrinterServiceCtor();
+  const service = new PrinterServiceCtor(testPrinterConfig);
   const sale = testDb.prepare("SELECT id FROM sale WHERE status = 'completed'").get() as { id: number };
 
   let cutCalled = false;
@@ -316,7 +323,7 @@ test("envia comando de corte de papel após a impressão", async () => {
 });
 
 test("lança erro descritivo quando impressora está offline", async () => {
-  const service = new PrinterServiceCtor();
+  const service = new PrinterServiceCtor(testPrinterConfig);
   const sale = testDb.prepare("SELECT id FROM sale WHERE status = 'completed'").get() as { id: number };
 
   const Module2 = require("module");
