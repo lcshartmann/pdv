@@ -23,7 +23,7 @@ import {
   forwardRef,
   type ChangeEvent,
 } from "react";
-import { Link } from "react-router-dom";
+import NavBar from "../components/NavBar";
 import { toast } from "sonner";
 import ScrollArea from "../components/ScrollArea";
 import { uiStoreActions, useUiStore, type CatalogStockFilter } from "../store/uiStore";
@@ -884,32 +884,11 @@ export default function Catalog() {
     return <span className="text-[#1D9E75] text-[9px] ml-1">{sortDir === 1 ? "↑" : "↓"}</span>;
   };
 
-  const clockLabel = useMemo(() => {
-    const nowDate = new Date();
-    const time = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(nowDate);
-    const date = new Intl.DateTimeFormat("pt-BR", { weekday: "short", day: "2-digit", month: "short" }).format(nowDate);
-    return `${time} · ${date.replace(".", "")}`;
-  }, []);
-
-
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#111318] text-[#e8e6df]" style={{ fontFamily: "system-ui, sans-serif" }}>
 
      
-      <div className="flex items-center justify-between border-b border-[#2a2d35] bg-[#1a1d24] px-4 py-2">
-        <nav className="flex items-center gap-2 text-sm">
-          <Link to="/" className="rounded-md px-3 py-1.5 text-[#c2c0b6] hover:bg-[#22262f] hover:text-[#e8e6df]">
-            Venda <span className="ml-2 rounded border border-[#343945] bg-[#0f131f] px-1.5 py-0.5 text-xs">F1</span>
-          </Link>
-          <Link to="/" className="rounded-md bg-[#22262f] px-3 py-1.5 text-[#e8e6df]">
-            Produtos <span className="ml-2 rounded border border-[#343945] bg-[#0f131f] px-1.5 py-0.5 text-xs">F6</span>
-          </Link>
-          <Link to="/reports" className="rounded-md px-3 py-1.5 text-[#c2c0b6] hover:bg-[#22262f] hover:text-[#e8e6df]">
-            Relatórios <span className="ml-2 rounded border border-[#343945] bg-[#0f131f] px-1.5 py-0.5 text-xs">F7</span>
-          </Link>
-        </nav>
-        <span className="text-sm text-[#9d9c99]">{clockLabel}</span>
-      </div>
+      <NavBar />
 
       {/* ── Toolbar ── */}
       <div className="bg-[#1a1d24] border-b border-[#2a2d35] px-4 py-2.5 flex items-center gap-2.5 flex-wrap shrink-0">

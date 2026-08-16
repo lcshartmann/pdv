@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import NavBar from "../components/NavBar";
 import { Line, Bar } from "react-chartjs-2";
 import {
   Chart as ChartJS,
@@ -159,12 +159,6 @@ export default function ReportsPage(): JSX.Element {
   const [detailError, setDetailError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [now, setNow] = useState(new Date());
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(new Date()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
 
   useEffect(() => {
     if (preset === "custom") {
@@ -236,19 +230,6 @@ export default function ReportsPage(): JSX.Element {
       1
     );
   }, [topMode, topProducts]);
-
-  const clockLabel = useMemo(() => {
-    const time = new Intl.DateTimeFormat("pt-BR", {
-      hour: "2-digit",
-      minute: "2-digit"
-    }).format(now);
-    const date = new Intl.DateTimeFormat("pt-BR", {
-      weekday: "short",
-      day: "2-digit",
-      month: "short"
-    }).format(now);
-    return `${time} · ${date.replace(".", "")}`;
-  }, [now]);
 
   const normalizedDateRange = useMemo(() => {
     if (dateFrom <= dateTo) {
@@ -449,38 +430,7 @@ export default function ReportsPage(): JSX.Element {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[#111318] text-[#e8e6df]">
-      <div className="flex items-center justify-between border-b border-[#2a2d35] bg-[#1a1d24] px-4 py-2">
-        <nav className="flex items-center gap-2 text-sm">
-          <Link
-            to="/"
-            className="rounded-md px-3 py-1.5 text-[#c2c0b6] hover:bg-[#22262f] hover:text-[#e8e6df]"
-          >
-            Venda{" "}
-            <span className="ml-2 rounded border border-[#343945] bg-[#0f131f] px-1.5 py-0.5 text-xs">
-              F1
-            </span>
-          </Link>
-          <Link
-            to="/catalog"
-            className="rounded-md px-3 py-1.5 text-[#c2c0b6] hover:bg-[#22262f] hover:text-[#e8e6df]"
-          >
-            Produtos{" "}
-            <span className="ml-2 rounded border border-[#343945] bg-[#0f131f] px-1.5 py-0.5 text-xs">
-              F6
-            </span>
-          </Link>
-          <Link
-            to="/reports"
-            className="rounded-md bg-[#22262f] px-3 py-1.5 text-[#e8e6df]"
-          >
-            Relatórios{" "}
-            <span className="ml-2 rounded border border-[#343945] bg-[#0f131f] px-1.5 py-0.5 text-xs">
-              F7
-            </span>
-          </Link>
-        </nav>
-        <span className="text-sm text-[#9d9c99]">{clockLabel}</span>
-      </div>
+      <NavBar />
 
       <div className="flex flex-wrap items-center gap-3 border-b border-[#2a2d35] bg-[#1a1d24] px-4 py-2.5">
         <span className="text-[12px] text-[#6b6a65]">Período:</span>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import NavBar from "../components/NavBar";
+import { toast } from "sonner";
 import ScrollArea from "../components/ScrollArea";
 import { uiStoreActions, useUiStore } from "../store/uiStore";
 import type { Product, SaleItem, UnitType } from "../../shared/types";
@@ -166,12 +167,12 @@ export default function SalePage(): JSX.Element {
     saleId: null,
     message: ""
   });
-  const [now, setNow] = useState(new Date());
   const [scaleConnected, setScaleConnected] = useState(false);
   const [scaleStatusLabel, setScaleStatusLabel] = useState(
     "Balança Prix 3 desconectada"
   );
   const [lastScaleWeightKg, setLastScaleWeightKg] = useState(0);
+  const [printerAvailable, setPrinterAvailable] = useState(false);
 
   const startingSaleRef = useRef(false);
   const bootstrappedRef = useRef(false);
@@ -259,6 +260,15 @@ export default function SalePage(): JSX.Element {
     }
   }, []);
 
+  const syncPrinterStatus = useCallback(async (): Promise<void> => {
+    try {
+      const status = await window.api.printerGetStatus();
+      setPrinterAvailable(status.available);
+    } catch {
+      setPrinterAvailable(false);
+    }
+  }, []);
+
   const startNewSale = useCallback(
     async (options?: { force?: boolean }): Promise<void> => {
       if (startingSaleRef.current) {
@@ -332,11 +342,6 @@ export default function SalePage(): JSX.Element {
   }, [loadMostSold, loadProducts, saleId, startNewSale]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(new Date()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
     void syncScaleStatus();
     const timer = window.setInterval(() => {
       void syncScaleStatus();
@@ -344,18 +349,15 @@ export default function SalePage(): JSX.Element {
     return () => window.clearInterval(timer);
   }, [syncScaleStatus]);
 
-  const clockLabel = useMemo(() => {
-    const time = new Intl.DateTimeFormat("pt-BR", {
-      hour: "2-digit",
-      minute: "2-digit"
-    }).format(now);
-    const date = new Intl.DateTimeFormat("pt-BR", {
-      weekday: "short",
-      day: "2-digit",
-      month: "short"
-    }).format(now);
-    return `${time} · ${date.replace(".", "")}`;
-  }, [now]);
+  useEffect(() => {
+    void syncPrinterStatus();
+    // Intervalo mais folgado que a balança: o status da impressora muda
+    // raramente e o healthcheck de rede abre um socket a cada checagem.
+    const timer = window.setInterval(() => {
+      void syncPrinterStatus();
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [syncPrinterStatus]);
 
   const subtotal = useMemo(
     () => saleLines.reduce((acc, line) => acc + line.total, 0),
@@ -435,9 +437,14 @@ export default function SalePage(): JSX.Element {
         change_amount: change,
         status: "confirmed"
       });
-      await window.api.saleComplete({ saleId });
+      const completeResult = await window.api.saleComplete({ saleId });
       uiStoreActions.setSaleStatus("completed");
       setCashModal({ open: false, amountReceived: "", error: null });
+      if (completeResult.printerOffline) {
+        toast.warning(
+          "Impressora offline: venda concluída, comprovante não impresso."
+        );
+      }
     } catch (error) {
       const message =
         error instanceof Error
@@ -991,38 +998,7 @@ export default function SalePage(): JSX.Element {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[#111318] text-[#e8e6df]">
-      <div className="flex items-center justify-between border-b border-[#2a2d35] bg-[#1a1d24] px-4 py-2">
-        <nav className="flex items-center gap-2 text-sm">
-          <Link
-            to="/"
-            className="rounded-md bg-[#22262f] px-3 py-1.5 text-[#e8e6df]"
-          >
-            Venda{" "}
-            <span className="ml-2 rounded border border-[#343945] bg-[#0f131f] px-1.5 py-0.5 text-xs">
-              F1
-            </span>
-          </Link>
-          <Link
-            to="/catalog"
-            className="rounded-md px-3 py-1.5 text-[#c2c0b6] hover:bg-[#22262f] hover:text-[#e8e6df]"
-          >
-            Produtos{" "}
-            <span className="ml-2 rounded border border-[#343945] bg-[#0f131f] px-1.5 py-0.5 text-xs">
-              F6
-            </span>
-          </Link>
-          <Link
-            to="/reports"
-            className="rounded-md px-3 py-1.5 text-[#c2c0b6] hover:bg-[#22262f] hover:text-[#e8e6df]"
-          >
-            Relatórios{" "}
-            <span className="ml-2 rounded border border-[#343945] bg-[#0f131f] px-1.5 py-0.5 text-xs">
-              F7
-            </span>
-          </Link>
-        </nav>
-        <span className="text-sm text-[#9d9c99]">{clockLabel}</span>
-      </div>
+      <NavBar />
 
       {errorMessage ? (
         <div className="border-b border-[#3c1e24] bg-[#2b1519] px-4 py-2 text-sm text-[#ff8d8d]">
@@ -1102,11 +1078,21 @@ export default function SalePage(): JSX.Element {
           </ScrollArea>
 
           <div className="flex items-center justify-between border-t border-[#2a2d35] pt-3 text-xs">
-            <span className="flex items-center text-[#7f807c]">
-              <span
-                className={`mr-2 inline-block h-2 w-2 rounded-full ${scaleConnected ? "bg-[#00b386]" : "bg-[#ff6f99]"}`}
-              />
-              {scaleStatusLabel}
+            <span className="flex items-center gap-4 text-[#7f807c]">
+              <span className="flex items-center">
+                <span
+                  className={`mr-2 inline-block h-2 w-2 rounded-full ${scaleConnected ? "bg-[#00b386]" : "bg-[#ff6f99]"}`}
+                />
+                {scaleStatusLabel}
+              </span>
+              <span className="flex items-center">
+                <span
+                  className={`mr-2 inline-block h-2 w-2 rounded-full ${printerAvailable ? "bg-[#00b386]" : "bg-[#ff6f99]"}`}
+                />
+                {printerAvailable
+                  ? "Impressora conectada"
+                  : "Impressora desconectada"}
+              </span>
             </span>
             <span className="font-medium text-[#00b4a1]">
               {lastScaleWeightKg.toFixed(3).replace(".", ",")} kg
