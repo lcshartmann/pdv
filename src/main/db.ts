@@ -74,7 +74,7 @@ PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 `;
 
-const seedCategories = ["Hortifruti", "Laticínios", "Limpeza", "Bebidas", "Mercearia"];
+const seedCategories = ["Expositores", "Armário", "Bancas", "B. Verduras", "Geladeira", "Caixa"];
 
 export function getDb(): Database.Database {
   if (!dbInstance) {
@@ -97,10 +97,6 @@ function seedInitialData(db: Database.Database): void {
   }
 
   const insertCategory = db.prepare("INSERT INTO category(name) VALUES (?)");
-  const insertProduct = db.prepare(
-    `INSERT INTO product (name, barcode, unit_type, price_per_unit, stock_qty, stock_alert_qty, category_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  );
 
   const categoryByName = new Map<string, number>();
 
@@ -109,18 +105,6 @@ function seedInitialData(db: Database.Database): void {
       const info = insertCategory.run(categoryName);
       categoryByName.set(categoryName, Number(info.lastInsertRowid));
     }
-
-    insertProduct.run("Tomate", null, "kg", 6.9, 0, 0, categoryByName.get("Hortifruti"));
-    insertProduct.run(
-      "Leite Integral 1L",
-      "7891000100103",
-      "unit",
-      4.5,
-      0,
-      0,
-      categoryByName.get("Laticínios")
-    );
-    insertProduct.run("Arroz 5kg", "7896006700916", "unit", 24.9, 0, 0, categoryByName.get("Mercearia"));
   });
 
   tx();
