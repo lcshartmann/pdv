@@ -1053,6 +1053,12 @@ export default function SalePage(): JSX.Element {
   }, [printerWarning.saleId]);
 
   const searching = search.trim().length > 0;
+  // Peso para o visor LCD. Mantém o ponto decimal (a fonte DSEG7 não tem
+  // vírgula, e o "." é o pontinho de sete segmentos autêntico do visor). A
+  // "sombra" repete a string com todo dígito virando 8 — os segmentos apagados
+  // desenhados atrás, como num LCD real.
+  const scaleWeightText = lastScaleWeightKg.toFixed(3);
+  const scaleWeightGhost = scaleWeightText.replace(/\d/g, "8");
   const statusLabel =
     saleStatus === "cancelled"
       ? "Cancelada"
@@ -1079,6 +1085,20 @@ export default function SalePage(): JSX.Element {
       <div className="grid min-h-0 flex-1 grid-cols-[1fr_3fr]">
         {/* Rail de seleção — 25% */}
         <section className="flex min-h-0 flex-col gap-3 border-r border-[#2a2d35] bg-[#0f131f] p-4">
+          {/* Visor LCD do peso da balança — o dado que o caixa mais consulta
+              ao pesar, por isso ganha destaque no topo do rail. */}
+          <div className="rounded-md border border-[#0d1d16] bg-[#04100b] px-4 py-4 shadow-[inset_0_2px_10px_rgba(0,0,0,0.8)]">
+            <div className="flex items-baseline justify-end gap-2 overflow-hidden">
+              <span
+                className="lcd-display text-[52px] leading-none text-[#2fffb0]"
+                data-ghost={scaleWeightGhost}
+              >
+                {scaleWeightText}
+              </span>
+              <span className="text-lg font-medium text-[#2f8c6a]">kg</span>
+            </div>
+          </div>
+
           <div className="relative flex items-center">
             <Search className="pointer-events-none absolute left-3 size-4 text-muted-foreground" />
             <Input
@@ -1148,25 +1168,20 @@ export default function SalePage(): JSX.Element {
             })}
           </ScrollArea>
 
-          <div className="flex items-center justify-between border-t border-[#2a2d35] pt-3 text-xs">
-            <span className="flex items-center gap-4 text-[#7f807c]">
-              <span className="flex items-center">
-                <span
-                  className={`mr-2 inline-block h-2 w-2 rounded-full ${scaleConnected ? "bg-[#00b386]" : "bg-[#ff6f99]"}`}
-                />
-                {scaleStatusLabel}
-              </span>
-              <span className="flex items-center">
-                <span
-                  className={`mr-2 inline-block h-2 w-2 rounded-full ${printerAvailable ? "bg-[#00b386]" : "bg-[#ff6f99]"}`}
-                />
-                {printerAvailable
-                  ? "Impressora conectada"
-                  : "Impressora desconectada"}
-              </span>
+          <div className="flex items-center gap-4 border-t border-[#2a2d35] pt-3 text-xs">
+            <span className="flex items-center text-[#7f807c]">
+              <span
+                className={`mr-2 inline-block h-2 w-2 rounded-full ${scaleConnected ? "bg-[#00b386]" : "bg-[#ff6f99]"}`}
+              />
+              {scaleStatusLabel}
             </span>
-            <span className="font-medium text-[#00b4a1]">
-              {lastScaleWeightKg.toFixed(3).replace(".", ",")} kg
+            <span className="flex items-center text-[#7f807c]">
+              <span
+                className={`mr-2 inline-block h-2 w-2 rounded-full ${printerAvailable ? "bg-[#00b386]" : "bg-[#ff6f99]"}`}
+              />
+              {printerAvailable
+                ? "Impressora conectada"
+                : "Impressora desconectada"}
             </span>
           </div>
         </section>

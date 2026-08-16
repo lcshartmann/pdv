@@ -2,6 +2,39 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Fonte de sete segmentos (DSEG7 Classic, open source) para o visor LCD do
+   peso da balança na tela de venda. Bundlada localmente — o app roda offline. */
+@font-face {
+  font-family: "DSEG7 Classic";
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url("./assets/fonts/DSEG7Classic-Bold.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "DSEG7 Classic";
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url("./assets/fonts/DSEG7Classic-Regular.woff2") format("woff2");
+}
+
+/* Visor LCD do peso: dígitos de sete segmentos com "segmentos apagados"
+   desenhados atrás (o "8.8.8.8." em baixo relevo característico dos displays). */
+.lcd-display {
+  font-family: "DSEG7 Classic", monospace;
+  position: relative;
+}
+
+.lcd-display::before {
+  content: attr(data-ghost);
+  position: absolute;
+  inset: 0;
+  color: rgba(47, 255, 176, 0.08);
+  pointer-events: none;
+}
+
 * {
   box-sizing: border-box;
 }
