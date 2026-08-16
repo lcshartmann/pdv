@@ -667,52 +667,66 @@ export default function SalePage(): JSX.Element {
     [saleId, saleStatus]
   );
 
-  const runScaleRead = useCallback(async (product: Product): Promise<void> => {
-    setScaleStatusLabel("Lendo balança…");
-    setWeightModal({
-      open: true,
-      product,
-      weight: "",
-      loading: true,
-      scaleError: null
-    });
+  const runScaleRead = useCallback(
+    async (
+      product: Product,
+      options?: { refocusSearch?: boolean }
+    ): Promise<void> => {
+      // Sem balança conectada: vai direto para a entrada manual no modal.
+      if (!scaleConnectedRef.current) {
+        setScaleStatusLabel("Balança Prix 3 desconectada");
+        setWeightModal({
+          open: true,
+          product,
+          weight: "",
+          loading: false,
+          scaleError: "Balança desconectada. Informe o peso manualmente."
+        });
+        return;
+      }
 
-    if (!scaleConnectedRef.current) {
-      setScaleStatusLabel("Balança Prix 3 desconectada");
-      setWeightModal({
-        open: true,
-        product,
-        weight: "",
-        loading: false,
-        scaleError: "Balança desconectada. Informe o peso manualmente."
-      });
-      return;
-    }
+      setScaleStatusLabel("Lendo balança…");
+      try {
+        const weight = await window.api.scaleReadStableWeight();
+        setScaleConnected(true);
+        setScaleStatusLabel("Balança Prix 3 conectada");
+        setLastScaleWeightKg(weight);
 
-    try {
-      const weight = await window.api.scaleReadStableWeight();
-      setScaleConnected(true);
-      setScaleStatusLabel("Balança Prix 3 conectada");
-      setLastScaleWeightKg(weight);
-      setWeightModal({
-        open: true,
-        product,
-        weight: weight.toFixed(3),
-        loading: false,
-        scaleError: null
-      });
-    } catch {
-      setScaleConnected(false);
-      setScaleStatusLabel("Balança Prix 3 desconectada");
-      setWeightModal({
-        open: true,
-        product,
-        weight: "",
-        loading: false,
-        scaleError: "Balança desconectada. Informe o peso manualmente."
-      });
-    }
-  }, []);
+        // Peso válido lido da balança: adiciona o item direto, sem modal.
+        if (Number.isFinite(weight) && weight > 0) {
+          setWeightModal({
+            open: false,
+            product: null,
+            weight: "",
+            loading: false,
+            scaleError: null
+          });
+          await persistAddedItem(product, weight, options);
+          return;
+        }
+
+        // Peso lido inválido (zero/negativo): abre o modal para ajuste manual.
+        setWeightModal({
+          open: true,
+          product,
+          weight: "",
+          loading: false,
+          scaleError: "Peso inválido na balança. Informe o peso manualmente."
+        });
+      } catch {
+        setScaleConnected(false);
+        setScaleStatusLabel("Balança Prix 3 desconectada");
+        setWeightModal({
+          open: true,
+          product,
+          weight: "",
+          loading: false,
+          scaleError: "Balança desconectada. Informe o peso manualmente."
+        });
+      }
+    },
+    [persistAddedItem]
+  );
 
   // Seleção de produto pelo rail: kg abre a balança; unitário entra direto com
   // quantidade 1 (o caixa ajusta na linha do carrinho se precisar).
@@ -726,7 +740,7 @@ export default function SalePage(): JSX.Element {
       }
 
       if (product.unit_type === "kg") {
-        await runScaleRead(product);
+        await runScaleRead(product, options);
         return;
       }
 
