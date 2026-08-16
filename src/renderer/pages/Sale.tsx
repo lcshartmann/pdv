@@ -210,6 +210,13 @@ export default function SalePage(): JSX.Element {
   const startingSaleRef = useRef(false);
   const bootstrappedRef = useRef(false);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  // Espelha scaleConnected para que runScaleRead (useCallback com deps []) leia
+  // sempre o status atual, sem cair em stale closure.
+  const scaleConnectedRef = useRef(false);
+
+  useEffect(() => {
+    scaleConnectedRef.current = scaleConnected;
+  }, [scaleConnected]);
 
   const productUnitById = useMemo(() => {
     const map = new Map<number, UnitType>();
@@ -670,15 +677,16 @@ export default function SalePage(): JSX.Element {
       scaleError: null
     });
 
-    if(!scaleConnected){
-       setWeightModal({
-          open: true,
-          product,
-          weight: "",
-          loading: false,
-          scaleError: "Balança desconectada. Informe o peso manualmente."
-        });
-        return;
+    if (!scaleConnectedRef.current) {
+      setScaleStatusLabel("Balança Prix 3 desconectada");
+      setWeightModal({
+        open: true,
+        product,
+        weight: "",
+        loading: false,
+        scaleError: "Balança desconectada. Informe o peso manualmente."
+      });
+      return;
     }
 
     try {
