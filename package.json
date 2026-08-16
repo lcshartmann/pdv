@@ -1,6 +1,6 @@
 {
   "name": "market-pos",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Desktop POS for a family market",
   "main": "dist/src/main/index.js",
   "scripts": {
