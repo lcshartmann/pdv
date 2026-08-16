@@ -1,7 +1,8 @@
-import { ipcMain, dialog, BrowserWindow } from "electron";
+import { ipcMain, dialog, BrowserWindow, app } from "electron";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type Database from "better-sqlite3";
+import Database from "better-sqlite3";
+import { SerialPort } from "serialport";
 import type {
   Category,
   PaymentCreateRequest,
@@ -31,15 +32,30 @@ import type {
   SaleAddItemResponse,
   SaleCancelRequest,
   SaleCompleteRequest,
+  SaleCompleteResponse,
   SaleCreateResponse,
   SaleItem,
   SaleRemoveItemRequest,
   SaleRemoveLastItemRequest,
   ScaleStatus,
-  SaleUpdateItemQuantityRequest
+  SaleUpdateItemQuantityRequest,
+  AppSettings,
+  SettingsUpdateRequest,
+  SerialPortInfo,
+  PrinterTestResponse,
+  NetworkCheckResponse,
+  DataBackupResponse,
+  DataRestoreResponse,
+  DataClearStockResponse
 } from "../shared/types";
 import { PrinterService } from "./services/printer";
 import { ScaleService } from "./services/scale";
+import { getDbPath, clearStock } from "./db";
+import {
+  getSettings,
+  updateSettings,
+  touchesScale
+} from "./services/settings";
 import { buildCatalogCsv } from "./services/productExport";
 import { parseProductsCsv } from "./services/productCsv";
 import {
@@ -54,7 +70,10 @@ interface SaleAggregate {
 }
 
 interface IpcServices {
-  scaleService: ScaleService;
+  /** Acessor porque a balança é re-instanciada a quente ao salvar config. */
+  getScaleService: () => ScaleService;
+  /** Reconstrói a balança com a config salva mais recente. */
+  reinitScale: () => Promise<void>;
   printerService: PrinterService;
 }
 
@@ -261,8 +280,23 @@ export function registerIpcHandlers(
       });
 
       completeSaleTx(payload.saleId);
+
+      // Healthcheck sob demanda: se a impressora não está disponível, a venda
+      // é concluída e a impressão é simplesmente pulada (sem bloquear o fluxo).
+      const printerStatus = await services.printerService.getStatus();
+      if (!printerStatus.available) {
+        return {
+          printed: false,
+          printerOffline: true
+        } satisfies SaleCompleteResponse;
+      }
+
       try {
         await services.printerService.printReceipt(payload.saleId);
+        return {
+          printed: true,
+          printerOffline: false
+        } satisfies SaleCompleteResponse;
       } catch (printError) {
         const printMessage =
           printError instanceof Error
@@ -936,10 +970,157 @@ export function registerIpcHandlers(
   });
 
   ipcMain.handle("scale:readStableWeight", async () => {
-    return services.scaleService.readStableWeightKg();
+    return services.getScaleService().readStableWeightKg();
   });
 
   ipcMain.handle("scale:getStatus", () => {
-    return services.scaleService.getStatus() satisfies ScaleStatus;
+    return services.getScaleService().getStatus() satisfies ScaleStatus;
+  });
+
+  ipcMain.handle("printer:getStatus", async () => {
+    return services.printerService.getStatus();
+  });
+
+  // ─── Configurações ──────────────────────────────────────────────────────
+
+  ipcMain.handle("settings:getAll", () => {
+    return getSettings() satisfies AppSettings;
+  });
+
+  ipcMain.handle(
+    "settings:update",
+    async (_event, payload: SettingsUpdateRequest) => {
+      const next = updateSettings(payload);
+      if (touchesScale(payload)) {
+        await services.reinitScale();
+      }
+      return next satisfies AppSettings;
+    }
+  );
+
+  ipcMain.handle("system:listSerialPorts", async () => {
+    const ports = await SerialPort.list();
+    return ports.map((entry) => ({
+      path: entry.path,
+      manufacturer: entry.manufacturer ?? null
+    })) satisfies SerialPortInfo[];
+  });
+
+  ipcMain.handle("printer:testPrint", async () => {
+    try {
+      await services.printerService.printTest();
+      return { ok: true } satisfies PrinterTestResponse;
+    } catch (error) {
+      return {
+        ok: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Falha ao imprimir cupom de teste."
+      } satisfies PrinterTestResponse;
+    }
+  });
+
+  ipcMain.handle(
+    "printer:checkNetwork",
+    async (_event, payload: { address: string }) => {
+      const reachable = await services.printerService.checkNetwork(
+        payload.address
+      );
+      return { reachable } satisfies NetworkCheckResponse;
+    }
+  );
+
+  // ─── Backup & dados ─────────────────────────────────────────────────────
+
+  ipcMain.handle("data:backup", async () => {
+    const now = new Date();
+    const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(
+      2,
+      "0"
+    )}-${String(now.getDate()).padStart(2, "0")}-${String(
+      now.getHours()
+    ).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}`;
+    const options = {
+      title: "Backup do banco de dados",
+      defaultPath: `market-pos-backup-${stamp}.db`,
+      filters: [{ name: "SQLite", extensions: ["db"] }]
+    };
+    const focused = BrowserWindow.getFocusedWindow();
+    const result = focused
+      ? await dialog.showSaveDialog(focused, options)
+      : await dialog.showSaveDialog(options);
+
+    if (result.canceled || !result.filePath) {
+      return { canceled: true } satisfies DataBackupResponse;
+    }
+
+    // Garante que o WAL esteja consolidado no arquivo principal antes de copiar.
+    db.pragma("wal_checkpoint(TRUNCATE)");
+    await fs.promises.copyFile(getDbPath(), result.filePath);
+    return {
+      canceled: false,
+      path: result.filePath
+    } satisfies DataBackupResponse;
+  });
+
+  ipcMain.handle("data:restore", async () => {
+    const focused = BrowserWindow.getFocusedWindow();
+    const options: Electron.OpenDialogOptions = {
+      title: "Restaurar backup",
+      filters: [{ name: "SQLite", extensions: ["db"] }],
+      properties: ["openFile"]
+    };
+    const result = focused
+      ? await dialog.showOpenDialog(focused, options)
+      : await dialog.showOpenDialog(options);
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return { canceled: true } satisfies DataRestoreResponse;
+    }
+
+    const candidate = result.filePaths[0];
+
+    // Valida que é um sqlite do PDV (tabelas esperadas) antes de trocar.
+    const requiredTables = ["product", "sale", "sale_item", "payment"];
+    try {
+      const check = new Database(candidate, { readonly: true });
+      try {
+        const names = (
+          check
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+            .all() as Array<{ name: string }>
+        ).map((row) => row.name);
+        const valid = requiredTables.every((table) => names.includes(table));
+        if (!valid) {
+          return { canceled: false, invalid: true } satisfies DataRestoreResponse;
+        }
+      } finally {
+        check.close();
+      }
+    } catch {
+      return { canceled: false, invalid: true } satisfies DataRestoreResponse;
+    }
+
+    const dbPath = getDbPath();
+    // Backup automático do banco atual antes de sobrescrever.
+    db.pragma("wal_checkpoint(TRUNCATE)");
+    await fs.promises.copyFile(dbPath, `${dbPath}.pre-restore`);
+
+    db.close();
+    await fs.promises.copyFile(candidate, dbPath);
+    // Remove WAL/SHM antigos para não misturar com o banco restaurado.
+    for (const suffix of ["-wal", "-shm"]) {
+      await fs.promises.rm(`${dbPath}${suffix}`, { force: true });
+    }
+
+    app.relaunch();
+    app.exit(0);
+    return { canceled: false, restored: true } satisfies DataRestoreResponse;
+  });
+
+  ipcMain.handle("data:clearStock", () => {
+    clearStock(db);
+    return { cleared: true } satisfies DataClearStockResponse;
   });
 }

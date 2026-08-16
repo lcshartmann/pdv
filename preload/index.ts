@@ -21,7 +21,17 @@ const api: RendererApi = {
   reportsSaleDetail: (payload) => ipcRenderer.invoke("reports:saleDetail", payload),
   reportsReprintReceipt: (payload) => ipcRenderer.invoke("reports:reprintReceipt", payload),
   scaleGetStatus: () => ipcRenderer.invoke("scale:getStatus"),
-  scaleReadStableWeight: () => ipcRenderer.invoke("scale:readStableWeight")
+  scaleReadStableWeight: () => ipcRenderer.invoke("scale:readStableWeight"),
+  printerGetStatus: () => ipcRenderer.invoke("printer:getStatus"),
+  settingsGetAll: () => ipcRenderer.invoke("settings:getAll"),
+  settingsUpdate: (payload) => ipcRenderer.invoke("settings:update", payload),
+  listSerialPorts: () => ipcRenderer.invoke("system:listSerialPorts"),
+  printerTest: () => ipcRenderer.invoke("printer:testPrint"),
+  printerCheckNetwork: (payload) =>
+    ipcRenderer.invoke("printer:checkNetwork", payload),
+  dataBackup: () => ipcRenderer.invoke("data:backup"),
+  dataRestore: () => ipcRenderer.invoke("data:restore"),
+  dataClearStock: () => ipcRenderer.invoke("data:clearStock")
 };
 
 contextBridge.exposeInMainWorld("api", api);
