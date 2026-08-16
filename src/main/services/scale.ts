@@ -47,7 +47,7 @@ export class ScaleService {
   private pendingReads: PendingRead[] = [];
 
   constructor(options: ScaleServiceOptions = {}) {
-    this.portPath = options.portPath ?? process.env.SCALE_PORT ?? "/dev/ttyUSB0";
+    this.portPath = options.portPath ?? "/dev/ttyUSB0";
     this.baudRate = options.baudRate ?? 9600;
     this.timeoutMs = options.timeoutMs ?? 4000;
     this.stableFramesRequired = options.stableFramesRequired ?? 2;
