@@ -648,12 +648,26 @@ export default function SalePage(): JSX.Element {
 
       if (event.key === "F2") {
         event.preventDefault();
+        if(hasOpenModal) return;
         searchInputRef.current?.focus();
       }
 
       if (event.key === "F3") {
         event.preventDefault();
+        if(hasOpenModal) return;
         openCashModal();
+      }
+
+      if (event.key === "F4") {
+        event.preventDefault();
+        if(hasOpenModal) return;
+        void confirmDirectPayment("pix");
+      }
+
+      if (event.key === "F5") {
+        event.preventDefault();
+        if(hasOpenModal) return;
+        void confirmDirectPayment("card");
       }
 
       if (event.key === "Escape") {
@@ -662,13 +676,14 @@ export default function SalePage(): JSX.Element {
           return;
         }
 
-        if (saleStatus === "open" && saleId) {
+        if (saleStatus === "open" && saleId && !hasOpenModal) {
           setCancelModal({ open: true, error: null });
         }
       }
 
       if (event.key === "Delete") {
         event.preventDefault();
+        if(hasOpenModal) return;
         removeLastSaleLine()
       }
     };
@@ -677,6 +692,7 @@ export default function SalePage(): JSX.Element {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
     closeOpenModal,
+    confirmDirectPayment,
     hasOpenModal,
     openCashModal,
     saleId,
