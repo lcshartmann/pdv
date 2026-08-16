@@ -427,7 +427,7 @@ export default function SalePage(): JSX.Element {
     amountReceivedValue < subtotal;
 
   const openCashModal = useCallback((): void => {
-    if (!saleId || saleStatus !== "open") {
+    if (!saleId || saleStatus !== "open" || subtotal <= 0) {
       return;
     }
 
