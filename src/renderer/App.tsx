@@ -4,6 +4,7 @@ import { Toaster } from "sonner";
 import CatalogPage from "./pages/Catalog";
 import ReportsPage from "./pages/Reports";
 import SalePage from "./pages/Sale";
+import SettingsPage from "./pages/Settings";
 
 function KeyboardPageNavigation(): null {
   const navigate = useNavigate();
@@ -49,6 +50,7 @@ export default function App(): JSX.Element {
           <Route path="/" element={<SalePage />} />
           <Route path="/catalog" element={<CatalogPage />} />
           <Route path="/reports" element={<ReportsPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
         </Routes>
         <Toaster theme="dark" position="top-right" richColors closeButton />
       </div>
