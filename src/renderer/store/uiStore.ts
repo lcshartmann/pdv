@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 import type { DiscountBasis, SaleStatus } from "../../shared/types";
 
-export type CatalogStockFilter = "all" | "low" | "out";
+export type CatalogStockFilter = "all" | "low" | "out" | "archived";
 export type CatalogCategoryFilter = number | "Todos";
 
 export interface SaleCartLine {

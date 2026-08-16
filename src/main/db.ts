@@ -111,16 +111,64 @@ function seedInitialData(db: Database.Database): void {
   tx();
 }
 
+interface Migration {
+  version: number;
+  up: (db: Database.Database) => void;
+}
+
 /**
- * Migrações idempotentes para bancos já existentes (o schema com IF NOT EXISTS
- * não recria colunas). Adiciona `sale_item.discount_basis` quando ausente.
+ * Verifica se uma coluna existe antes de adicioná-la. Mantém as migrações
+ * idempotentes mesmo em bancos que já receberam a coluna por caminhos antigos
+ * (ex.: bancos v1.0.0 cujo `user_version` ainda é 0).
+ */
+function hasColumn(db: Database.Database, table: string, column: string): boolean {
+  const columns = db
+    .prepare(`PRAGMA table_info(${table})`)
+    .all() as Array<{ name: string }>;
+  return columns.some((current) => current.name === column);
+}
+
+/**
+ * Migrações incrementais aplicadas sobre o schema baseline (v0). Cada migração
+ * roda uma única vez, na ordem, quando `version` for maior que o `user_version`
+ * gravado no arquivo .db.
+ */
+const migrations: Migration[] = [
+  {
+    // v1: desconto por item (antes aplicado de forma ad-hoc no boot).
+    version: 1,
+    up: (db) => {
+      if (!hasColumn(db, "sale_item", "discount_basis")) {
+        db.exec("ALTER TABLE sale_item ADD COLUMN discount_basis TEXT");
+      }
+    }
+  },
+  {
+    // v2: soft delete de produtos — `deleted_at` NULL = ativo.
+    version: 2,
+    up: (db) => {
+      if (!hasColumn(db, "product", "deleted_at")) {
+        db.exec("ALTER TABLE product ADD COLUMN deleted_at TEXT");
+      }
+    }
+  }
+];
+
+/**
+ * Runner de migrações versionado por `PRAGMA user_version` (inteiro nativo no
+ * cabeçalho do .db). Aplica cada migração pendente numa transação, avançando o
+ * `user_version` junto — bancos novos e existentes convergem para a última versão.
  */
 function runMigrations(db: Database.Database): void {
-  const columns = db
-    .prepare("PRAGMA table_info(sale_item)")
-    .all() as Array<{ name: string }>;
-  if (!columns.some((column) => column.name === "discount_basis")) {
-    db.exec("ALTER TABLE sale_item ADD COLUMN discount_basis TEXT");
+  const current = db.pragma("user_version", { simple: true }) as number;
+  for (const migration of migrations) {
+    if (migration.version > current) {
+      const apply = db.transaction(() => {
+        migration.up(db);
+        db.pragma(`user_version = ${migration.version}`);
+      });
+      apply();
+    }
   }
 }
 

@@ -27,6 +27,9 @@ import type {
   ProductImportCommitResponse,
   ProductImportValidateResponse,
   ProductUpdateRequest,
+  ProductListRequest,
+  ProductDeleteRequest,
+  ProductRestoreRequest,
   ValidatedImportRow,
   SaleAddItemRequest,
   SaleAddItemResponse,
@@ -394,10 +397,31 @@ export function registerIpcHandlers(
     ).run(payload.saleId);
   });
 
-  ipcMain.handle("product:list", () => {
+  ipcMain.handle("product:list", (_event, payload?: ProductListRequest) => {
+    // Por padrão só produtos ativos (deleted_at IS NULL). O catálogo pede
+    // onlyArchived para a visão de arquivados.
+    let filter = "WHERE deleted_at IS NULL";
+    if (payload?.onlyArchived) {
+      filter = "WHERE deleted_at IS NOT NULL";
+    } else if (payload?.includeArchived) {
+      filter = "";
+    }
     return db
-      .prepare("SELECT * FROM product ORDER BY name ASC")
+      .prepare(`SELECT * FROM product ${filter} ORDER BY name ASC`)
       .all() as Product[];
+  });
+
+  ipcMain.handle("product:delete", (_event, payload: ProductDeleteRequest) => {
+    // Soft delete: preserva histórico (sale_item/stock_movement referenciam o id).
+    db.prepare(
+      "UPDATE product SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND deleted_at IS NULL"
+    ).run(payload.id);
+  });
+
+  ipcMain.handle("product:restore", (_event, payload: ProductRestoreRequest) => {
+    db.prepare(
+      "UPDATE product SET deleted_at = NULL, updated_at = datetime('now') WHERE id = ?"
+    ).run(payload.id);
   });
 
   ipcMain.handle("category:list", () => {
@@ -439,6 +463,19 @@ export function registerIpcHandlers(
         "code" in error &&
         (error as { code?: string }).code === "SQLITE_CONSTRAINT_UNIQUE"
       ) {
+        const normalizedBarcode = payload.barcode?.trim() || null;
+        const archived = normalizedBarcode
+          ? (db
+              .prepare(
+                "SELECT id FROM product WHERE barcode = ? AND deleted_at IS NOT NULL"
+              )
+              .get(normalizedBarcode) as { id: number } | undefined)
+          : undefined;
+        if (archived) {
+          throw new Error(
+            "Código de barras pertence a um produto arquivado. Restaure-o na visão de arquivados."
+          );
+        }
         throw new Error("Código de barras já cadastrado.");
       }
 
@@ -530,17 +567,30 @@ export function registerIpcHandlers(
 
     const products = db
       .prepare(
-        "SELECT id, name, barcode, unit_type, price_per_unit, stock_qty, stock_alert_qty, category_id FROM product"
+        "SELECT id, name, barcode, unit_type, price_per_unit, stock_qty, stock_alert_qty, category_id FROM product WHERE deleted_at IS NULL"
       )
       .all() as ExistingProductRow[];
     const categories = db
       .prepare("SELECT id, name FROM category")
       .all() as ExistingCategoryRow[];
+    // Barcodes de produtos arquivados continuam reservados (UNIQUE). Import
+    // ignora arquivados como alvo de update, mas precisa detectar a colisão
+    // para não abortar o lote inteiro no INSERT.
+    const archivedBarcodes = new Set(
+      (
+        db
+          .prepare(
+            "SELECT barcode FROM product WHERE deleted_at IS NOT NULL AND barcode IS NOT NULL"
+          )
+          .all() as Array<{ barcode: string }>
+      ).map((row) => row.barcode)
+    );
 
     const { summary, errors, validRows } = validateImportRows(
       parsed.rows,
       products,
-      categories
+      categories,
+      archivedBarcodes
     );
 
     return {
@@ -808,6 +858,7 @@ export function registerIpcHandlers(
           CASE WHEN p.stock_qty = 0 THEN 'out' ELSE 'low' END AS status
         FROM product p
         WHERE p.stock_qty <= p.stock_alert_qty AND p.stock_alert_qty > 0
+          AND p.deleted_at IS NULL
         ORDER BY status ASC, p.stock_qty ASC, p.name ASC
         LIMIT 10
         `

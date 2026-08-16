@@ -448,6 +448,68 @@ const RestockModal = ({ product, onClose, onConfirm }: RestockModalProps) => {
   );
 };
 
+// ─── Modal de confirmação de arquivamento (soft delete) ───────────────────────
+
+interface DeleteModalProps {
+  product: Product;
+  onClose: () => void;
+  onConfirm: (product: Product) => Promise<void>;
+}
+
+const DeleteModal = ({ product, onClose, onConfirm }: DeleteModalProps) => {
+  const [busy, setBusy] = useState(false);
+  const hasStock = product.stock_qty > 0 && product.stock_alert_qty >= 0;
+
+  const handleConfirm = async (): Promise<void> => {
+    if (busy) return;
+    setBusy(true);
+    await onConfirm(product);
+    // Em sucesso o modal é desmontado pelo pai; em erro, reabilita.
+    setBusy(false);
+  };
+
+  return (
+    <Modal
+      title="Arquivar produto"
+      onClose={onClose}
+      width="w-[400px]"
+      footer={
+        <>
+          <button
+            onClick={onClose}
+            disabled={busy}
+            className="px-4 py-2 rounded-lg bg-[#22262f] border border-[#2a2d35] text-[13px] text-[#c2c0b6] hover:bg-[#2a2d35] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={() => void handleConfirm()}
+            disabled={busy}
+            className="px-4 py-2 rounded-lg bg-[#E24B4A] text-[#2a0d0d] text-[13px] font-medium disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+          >
+            {busy ? "Arquivando…" : "Arquivar"}
+          </button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-3">
+        <p className="text-[13px] text-[#c2c0b6] leading-relaxed">
+          <span className="font-medium text-[#e8e6df]">{product.name}</span> sairá da tela
+          de vendas e do catálogo. As vendas já registradas continuam intactas nos relatórios.
+        </p>
+        {hasStock && (
+          <div className="bg-[#2a2410] rounded-lg px-3 py-2.5 text-[12px] text-[#EF9F27]">
+            Atenção: ainda há {fmtQty(product.stock_qty, product.unit_type)} em estoque.
+          </div>
+        )}
+        <p className="text-[12px] text-[#6b6a65]">
+          Você pode restaurá-lo depois pelo filtro “Arquivados”.
+        </p>
+      </div>
+    </Modal>
+  );
+};
+
 // ─── PDV-4 · Modal de preview do import ───────────────────────────────────────
 
 interface ImportPreviewModalProps {
@@ -562,11 +624,14 @@ const ImportPreviewModal = ({ preview, onClose, onConfirm }: ImportPreviewModalP
 interface RowProps {
   product: Product;
   index: number;
+  archived?: boolean;
   onEdit: (p: Product) => void;
   onRestock: (p: Product) => void;
+  onDelete: (p: Product) => void;
+  onRestore: (p: Product) => void;
 }
 
-const ProductRow = ({ product: p, index, onEdit, onRestock }: RowProps) => {
+const ProductRow = ({ product: p, index, archived = false, onEdit, onRestock, onDelete, onRestore }: RowProps) => {
   const status = stockStatus(p);
 
   const stockColor =
@@ -633,24 +698,45 @@ const ProductRow = ({ product: p, index, onEdit, onRestock }: RowProps) => {
 
       {/* Ações */}
       <div className="flex items-center gap-1">
-        {/* PROD-03: entrada de estoque */}
-        <button
-          onClick={() => onRestock(p)}
-          title="Entrada de estoque"
-          className="w-7 h-7 rounded flex items-center justify-center text-[13px] bg-[#22262f] border border-[#2a2d35] text-[#6b6a65] hover:bg-[#0a1f14] hover:border-[#1D9E75] hover:text-[#1D9E75] transition-colors"
-        >
-          +
-        </button>
+        {archived ? (
+          /* Restaurar produto arquivado */
+          <button
+            onClick={() => onRestore(p)}
+            title="Restaurar produto"
+            className="px-2 h-7 rounded flex items-center justify-center text-[12px] bg-[#22262f] border border-[#2a2d35] text-[#6b6a65] hover:bg-[#0a1f14] hover:border-[#1D9E75] hover:text-[#1D9E75] transition-colors"
+          >
+            ↺ Restaurar
+          </button>
+        ) : (
+          <>
+            {/* PROD-03: entrada de estoque */}
+            <button
+              onClick={() => onRestock(p)}
+              title="Entrada de estoque"
+              className="w-7 h-7 rounded flex items-center justify-center text-[13px] bg-[#22262f] border border-[#2a2d35] text-[#6b6a65] hover:bg-[#0a1f14] hover:border-[#1D9E75] hover:text-[#1D9E75] transition-colors"
+            >
+              +
+            </button>
 
-        {/* PROD-02: editar / atualizar preço */}
-        <button
-          onClick={() => onEdit(p)}
-          title="Editar produto"
-          className="w-7 h-7 rounded flex items-center justify-center text-[13px] bg-[#22262f] border border-[#2a2d35] text-[#6b6a65] hover:bg-[#0e1f35] hover:border-[#378ADD] hover:text-[#378ADD] transition-colors"
-        >
-          ✎
-        </button>
+            {/* PROD-02: editar / atualizar preço */}
+            <button
+              onClick={() => onEdit(p)}
+              title="Editar produto"
+              className="w-7 h-7 rounded flex items-center justify-center text-[13px] bg-[#22262f] border border-[#2a2d35] text-[#6b6a65] hover:bg-[#0e1f35] hover:border-[#378ADD] hover:text-[#378ADD] transition-colors"
+            >
+              ✎
+            </button>
 
+            {/* Arquivar produto (soft delete) */}
+            <button
+              onClick={() => onDelete(p)}
+              title="Arquivar produto"
+              className="w-7 h-7 rounded flex items-center justify-center text-[13px] bg-[#22262f] border border-[#2a2d35] text-[#6b6a65] hover:bg-[#1f1215] hover:border-[#E24B4A] hover:text-[#E24B4A] transition-colors"
+            >
+              🗑
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
@@ -663,6 +749,7 @@ type ModalState =
   | { type: "new" }
   | { type: "edit"; product: Product }
   | { type: "restock"; product: Product }
+  | { type: "delete"; product: Product }
   | { type: "importPreview"; preview: ProductImportPreview };
 
 export default function Catalog() {
@@ -675,6 +762,8 @@ export default function Catalog() {
   const [modal, setModal]             = useState<ModalState>({ type: "none" });
   const searchRef = useRef<HTMLInputElement>(null);
   const hasOpenModal = modal.type !== "none";
+
+  const showArchived = stockFilter === "archived";
 
   const closeModal = useCallback(() => setModal({ type: "none" }), []);
 
@@ -700,7 +789,7 @@ export default function Catalog() {
     try {
       const [categoryRows, productRows] = await Promise.all([
         window.api.categoryList(),
-        window.api.productList(),
+        window.api.productList(showArchived ? { onlyArchived: true } : undefined),
       ]);
       const categoryNameById = new Map(categoryRows.map((category) => [category.id, category.name]));
       setCategories(categoryRows);
@@ -714,7 +803,7 @@ export default function Catalog() {
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "Falha ao carregar catálogo.");
     }
-  }, []);
+  }, [showArchived]);
 
   // Fetch produtos
   useEffect(() => {
@@ -734,6 +823,7 @@ export default function Catalog() {
       const s = stockStatus(p);
       const matchStock =
         stockFilter === "all" ||
+        stockFilter === "archived" ||
         (stockFilter === "out" && s === "out") ||
         (stockFilter === "low" && (s === "low" || s === "out"));
       return matchSearch && matchCat && matchStock;
@@ -824,6 +914,29 @@ export default function Catalog() {
       closeModal();
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "Falha ao atualizar estoque.");
+    }
+  };
+
+  /** Soft delete: arquiva o produto (some da venda/catálogo, histórico preservado). */
+  const handleDelete = async (product: Product): Promise<void> => {
+    try {
+      await window.api.productDelete({ id: product.id });
+      await loadCatalog();
+      closeModal();
+      toast.success(`"${product.name}" arquivado.`);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "Falha ao arquivar produto.");
+    }
+  };
+
+  /** Restaura um produto arquivado (deleted_at → NULL). */
+  const handleRestore = async (product: Product): Promise<void> => {
+    try {
+      await window.api.productRestore({ id: product.id });
+      await loadCatalog();
+      toast.success(`"${product.name}" restaurado.`);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "Falha ao restaurar produto.");
     }
   };
 
@@ -929,7 +1042,7 @@ export default function Catalog() {
 
         {/* Filtro estoque — PROD-04 */}
         <div className="flex gap-1">
-          {([["all", "Todos"], ["low", "Baixo"], ["out", "Zerado"]] as const).map(([k, label]) => (
+          {([["all", "Todos"], ["low", "Baixo"], ["out", "Zerado"], ["archived", "Arquivados"]] as const).map(([k, label]) => (
             <button
               key={k}
               onClick={() => uiStoreActions.setCatalogStockFilter(k as CatalogStockFilter)}
@@ -1052,8 +1165,11 @@ export default function Catalog() {
                   key={p.id}
                   product={p}
                   index={i}
+                  archived={showArchived}
                   onEdit={(p) => setModal({ type: "edit", product: p })}
                   onRestock={(p) => setModal({ type: "restock", product: p })}
+                  onDelete={(p) => setModal({ type: "delete", product: p })}
+                  onRestore={(p) => void handleRestore(p)}
                 />
               ))
             )}
@@ -1108,6 +1224,13 @@ export default function Catalog() {
           product={modal.product}
           onClose={closeModal}
           onConfirm={handleRestock}
+        />
+      )}
+      {modal.type === "delete" && (
+        <DeleteModal
+          product={modal.product}
+          onClose={closeModal}
+          onConfirm={handleDelete}
         />
       )}
       {modal.type === "importPreview" && (

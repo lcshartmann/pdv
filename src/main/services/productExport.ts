@@ -26,6 +26,7 @@ export function collectCatalogForExport(
         c.name AS category_name
       FROM product p
       LEFT JOIN category c ON c.id = p.category_id
+      WHERE p.deleted_at IS NULL
       ORDER BY p.name ASC
       `
     )

@@ -59,7 +59,8 @@ const DIGITS_ONLY = /^\d+$/;
 export function validateImportRows(
   rows: RawCsvRow[],
   products: ExistingProductRow[],
-  categories: ExistingCategoryRow[]
+  categories: ExistingCategoryRow[],
+  archivedBarcodes: Set<string> = new Set()
 ): ValidationResult {
   const productById = new Map(products.map((p) => [p.id, p]));
   const barcodeOwner = new Map<string, ExistingProductRow>();
@@ -90,7 +91,8 @@ export function validateImportRows(
       barcodeOwner,
       categoryByName,
       idCounts,
-      newBarcodeCounts
+      newBarcodeCounts,
+      archivedBarcodes
     );
     if ("error" in outcome) {
       errors.push({ line: r.line, message: outcome.error });
@@ -116,7 +118,8 @@ function validateRow(
   barcodeOwner: Map<string, ExistingProductRow>,
   categoryByName: Map<string, ExistingCategoryRow>,
   idCounts: Map<string, number>,
-  newBarcodeCounts: Map<string, number>
+  newBarcodeCounts: Map<string, number>,
+  archivedBarcodes: Set<string>
 ): { error: string } | { row: ValidatedImportRow } {
   const isUpdate = r.id !== "";
 
@@ -152,6 +155,11 @@ function validateRow(
     const owner = barcodeOwner.get(r.barcode);
     if (owner && (!existing || owner.id !== existing.id)) {
       return { error: `Código de barras ${r.barcode} já usado por outro produto.` };
+    }
+    if (!owner && archivedBarcodes.has(r.barcode)) {
+      return {
+        error: `Código de barras ${r.barcode} pertence a um produto arquivado. Restaure-o para editá-lo.`
+      };
     }
     if (!isUpdate && (newBarcodeCounts.get(r.barcode) ?? 0) > 1) {
       return { error: `Código de barras ${r.barcode} duplicado entre linhas novas.` };

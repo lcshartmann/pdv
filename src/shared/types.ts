@@ -21,6 +21,8 @@ export interface Product {
   category_id: number | null;
   created_at: string;
   updated_at: string;
+  /** Timestamp de arquivamento (soft delete). `null` = produto ativo. */
+  deleted_at: string | null;
 }
 
 export interface Category {
@@ -190,6 +192,21 @@ export interface ProductImportCommitRequest {
 export interface ProductImportCommitResponse {
   /** quantas linhas foram efetivamente gravadas (inserts + updates). */
   applied: number;
+}
+
+export interface ProductListRequest {
+  /** Lista somente produtos arquivados (soft-deleted). */
+  onlyArchived?: boolean;
+  /** Inclui arquivados junto dos ativos. Ignorado se `onlyArchived` for true. */
+  includeArchived?: boolean;
+}
+
+export interface ProductDeleteRequest {
+  id: number;
+}
+
+export interface ProductRestoreRequest {
+  id: number;
 }
 
 export interface ProductUpdateRequest {
@@ -403,10 +420,12 @@ export interface RendererApi {
   saleSetItemDiscount: (payload: SaleSetItemDiscountRequest) => Promise<SaleAddItemResponse>;
   saleComplete: (payload: SaleCompleteRequest) => Promise<SaleCompleteResponse>;
   saleCancel: (payload: SaleCancelRequest) => Promise<void>;
-  productList: () => Promise<Product[]>;
+  productList: (payload?: ProductListRequest) => Promise<Product[]>;
   categoryList: () => Promise<Category[]>;
   productCreate: (payload: ProductCreateRequest) => Promise<ProductCreateResponse>;
   productUpdate: (payload: ProductUpdateRequest) => Promise<void>;
+  productDelete: (payload: ProductDeleteRequest) => Promise<void>;
+  productRestore: (payload: ProductRestoreRequest) => Promise<void>;
   productExport: () => Promise<ProductExportResponse>;
   productImportValidate: () => Promise<ProductImportValidateResponse>;
   productImportCommit: (
