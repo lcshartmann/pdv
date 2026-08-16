@@ -44,7 +44,7 @@ function KeyboardPageNavigation(): null {
 export default function App(): JSX.Element {
   return (
     <HashRouter>
-      <div className="h-screen overflow-hidden bg-[#111318] text-[#e8e6df]">
+      <div className="h-screen overflow-hidden bg-background text-foreground">
         <KeyboardPageNavigation />
         <Routes>
           <Route path="/" element={<SalePage />} />

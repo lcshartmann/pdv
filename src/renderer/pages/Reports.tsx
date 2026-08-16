@@ -623,7 +623,7 @@ export default function ReportsPage(): JSX.Element {
                 ) : (
                   <div className="p-4">
                     <p className="text-sm text-[#6b6a65]">
-                      {loading ? "Carregando..." : "Sem vendas no período."}
+                      {loading ? "Carregando…" : "Sem vendas no período."}
                     </p>
                   </div>
                 )}
@@ -702,7 +702,7 @@ export default function ReportsPage(): JSX.Element {
                     </div>
                   ) : (
                     <p className="text-sm text-[#6b6a65]">
-                      {loading ? "Carregando..." : "Sem itens no período."}
+                      {loading ? "Carregando…" : "Sem itens no período."}
                     </p>
                   )}
                 </ScrollArea>
@@ -863,7 +863,7 @@ export default function ReportsPage(): JSX.Element {
                   <div className="p-4">
                     <p className="text-sm text-[#6b6a65]">
                       {loading
-                        ? "Carregando..."
+                        ? "Carregando…"
                         : "Sem vendas desse produto no período."}
                     </p>
                   </div>
@@ -933,7 +933,7 @@ export default function ReportsPage(): JSX.Element {
                   })
                 ) : (
                   <div className="px-4 py-6 text-sm text-[#6b6a65]">
-                    {loading ? "Carregando..." : "Sem vendas no período."}
+                    {loading ? "Carregando…" : "Sem vendas no período."}
                   </div>
                 )}
               </ScrollArea>
@@ -1073,7 +1073,7 @@ export default function ReportsPage(): JSX.Element {
 
             <ScrollArea className="max-h-[72vh] overflow-y-auto p-4">
               {detailLoading ? (
-                <p className="text-sm text-[#6b6a65]">Carregando detalhes...</p>
+                <p className="text-sm text-[#6b6a65]">Carregando detalhes…</p>
               ) : null}
               {saleDetail ? (
                 <div className="space-y-3">
@@ -1180,7 +1180,7 @@ export default function ReportsPage(): JSX.Element {
                 disabled={!saleDetail || reprinting}
                 className="rounded border border-[#378ADD] bg-[#0e2337] px-3 py-1.5 text-xs text-[#66b1ff] disabled:opacity-50"
               >
-                {reprinting ? "Reimprimindo..." : "Reimprimir comprovante"}
+                {reprinting ? "Reimprimindo…" : "Reimprimir comprovante"}
               </button>
             </div>
           </div>

@@ -1,8 +1,41 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import NavBar from "../components/NavBar";
 import { toast } from "sonner";
+import {
+  Banknote,
+  CreditCard,
+  Pencil,
+  Printer,
+  QrCode,
+  RotateCcw,
+  Scale,
+  Search,
+  Trash2,
+  X
+} from "lucide-react";
 import ScrollArea from "../components/ScrollArea";
 import { uiStoreActions, useUiStore } from "../store/uiStore";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from "@/components/ui/alert-dialog";
 import type { Product, SaleItem, UnitType } from "../../shared/types";
 
 interface SaleLine {
@@ -628,7 +661,7 @@ export default function SalePage(): JSX.Element {
   );
 
   const runScaleRead = useCallback(async (product: Product): Promise<void> => {
-    setScaleStatusLabel("Lendo balança...");
+    setScaleStatusLabel("Lendo balança…");
     setWeightModal({
       open: true,
       product,
@@ -868,6 +901,29 @@ export default function SalePage(): JSX.Element {
     }
   }, [editModal, products, saleId, saleStatus]);
 
+  // Oferece "Desfazer" após remover: re-adiciona o produto com a mesma
+  // quantidade (gera um novo item de venda, mas restaura o carrinho).
+  const offerUndoRemoval = useCallback(
+    (line: SaleLine): void => {
+      const product = products.find((entry) => entry.id === line.productId);
+      if (!product) {
+        return;
+      }
+      toast("Item removido", {
+        description: line.product,
+        action: {
+          label: "Desfazer",
+          onClick: () => {
+            void persistAddedItem(product, line.quantityValue, {
+              refocusSearch: false
+            });
+          }
+        }
+      });
+    },
+    [persistAddedItem, products]
+  );
+
   const removeSaleLine = useCallback(
     async (line: SaleLine): Promise<void> => {
       if (!saleId || saleStatus !== "open") {
@@ -882,6 +938,7 @@ export default function SalePage(): JSX.Element {
           saleItemId: line.saleItemId
         });
         uiStoreActions.removeSaleLine(line.saleItemId);
+        offerUndoRemoval(line);
       } catch (error) {
         setErrorMessage(
           error instanceof Error ? error.message : "Falha ao remover item."
@@ -890,7 +947,7 @@ export default function SalePage(): JSX.Element {
         setIsUpdatingItem(false);
       }
     },
-    [saleId, saleStatus]
+    [offerUndoRemoval, saleId, saleStatus]
   );
 
   const removeLastSaleLine = useCallback(
@@ -899,6 +956,8 @@ export default function SalePage(): JSX.Element {
         return;
       }
 
+      const lastLine = saleLines[saleLines.length - 1] ?? null;
+
       setIsUpdatingItem(true);
       setErrorMessage(null);
       try {
@@ -906,6 +965,9 @@ export default function SalePage(): JSX.Element {
           saleId,
         });
         uiStoreActions.removeLastSaleLine();
+        if (lastLine) {
+          offerUndoRemoval(lastLine);
+        }
       } catch (error) {
         setErrorMessage(
           error instanceof Error ? error.message : "Falha ao remover item."
@@ -914,7 +976,7 @@ export default function SalePage(): JSX.Element {
         setIsUpdatingItem(false);
       }
     },
-    [saleId, saleStatus]
+    [offerUndoRemoval, saleId, saleLines, saleStatus]
   );
 
   const openCancelModal = useCallback((): void => {
@@ -968,7 +1030,7 @@ export default function SalePage(): JSX.Element {
     }
     setPrinterWarning((state) => ({
       ...state,
-      message: "Tentando reimprimir..."
+      message: "Tentando reimprimir…"
     }));
     try {
       await window.api.reportsReprintReceipt({ saleId: printerWarning.saleId });
@@ -1010,21 +1072,22 @@ export default function SalePage(): JSX.Element {
         {/* Rail de seleção — 25% */}
         <section className="flex min-h-0 flex-col gap-3 border-r border-[#2a2d35] bg-[#0f131f] p-4">
           <div className="relative flex items-center">
-            <input
+            <Search className="pointer-events-none absolute left-3 size-4 text-muted-foreground" />
+            <Input
               ref={searchInputRef}
               value={search}
               disabled={saleStatus !== "open"}
               onChange={(event) => setSearch(event.target.value)}
               onKeyDown={onSearchKeyDown}
-              placeholder="Buscar produto ou código..."
-              className="w-full rounded-lg border border-[#1D9E75] bg-[#22262f] px-4 py-3 pr-12 text-base text-[#e8e6df] outline-none placeholder:text-[#8d8c89] focus:border-[#2ad6a2] focus:ring-2 focus:ring-[#2ad6a2]/30 disabled:cursor-not-allowed disabled:border-[#353846] disabled:text-[#6f706c]"
+              placeholder="Buscar produto ou código…"
+              className="h-12 border-primary pl-10 pr-12 text-base"
             />
-            <span className="pointer-events-none absolute right-3 rounded border border-[#2d3240] bg-[#111522] px-2 py-1 text-xs text-[#8b8d95]">
+            <span className="pointer-events-none absolute right-3 rounded border border-border bg-background px-2 py-1 text-xs text-muted-foreground">
               F2
             </span>
           </div>
 
-          <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-[#8f8e8b]">
+          <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
             {searching ? `Resultados (${pickerResults.length})` : "Mais vendidos"}
           </p>
 
@@ -1052,7 +1115,7 @@ export default function SalePage(): JSX.Element {
                   key={index}
                   onClick={() => pickByIndex(index, product)}
                   disabled={saleStatus !== "open"}
-                  className={`mb-2 flex min-h-[50px] items-center gap-3 rounded-lg border px-3 py-2 text-left transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-50 ${
+                  className={`mb-2 flex min-h-[50px] items-center gap-3 rounded-lg border px-3 py-2 text-left transition-[transform,background-color,border-color,box-shadow] duration-150 disabled:cursor-not-allowed disabled:opacity-50 ${
                     isFlash
                       ? "scale-[1.02] border-[#2ad6a2] bg-[#1f4638] ring-2 ring-[#2ad6a2]"
                       : isHighlighted
@@ -1157,20 +1220,26 @@ export default function SalePage(): JSX.Element {
                     className="text-right text-[15px] text-[#e8e6df]"
                   />
                   <div className="flex items-center justify-end gap-1.5">
-                    <button
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      aria-label={`Editar quantidade de ${line.product}`}
                       onClick={() => openEditModal(line)}
                       disabled={saleStatus !== "open"}
-                      className="rounded border border-[#303543] bg-[#202532] px-2 py-1 text-xs text-[#9ca1ab] disabled:cursor-not-allowed disabled:opacity-50"
+                      className="size-8 text-muted-foreground hover:text-foreground"
                     >
-                      E
-                    </button>
-                    <button
+                      <Pencil className="size-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      aria-label={`Remover ${line.product}`}
                       onClick={() => void removeSaleLine(line)}
                       disabled={saleStatus !== "open"}
-                      className="rounded border border-[#303543] bg-[#202532] px-2 py-1 text-xs text-[#9ca1ab] disabled:cursor-not-allowed disabled:opacity-50"
+                      className="size-8 text-muted-foreground hover:border-danger-dark hover:text-error-text"
                     >
-                      X
-                    </button>
+                      <Trash2 className="size-4" />
+                    </Button>
                   </div>
                 </div>
               ))
@@ -1200,65 +1269,106 @@ export default function SalePage(): JSX.Element {
               <button
                 onClick={openCashModal}
                 disabled={!saleId || saleStatus !== "open"}
-                className="flex flex-col items-start rounded-lg bg-[#11ad7d] px-4 py-3.5 text-sm font-semibold text-[#063f2d] transition-colors hover:bg-[#14c48e] disabled:cursor-not-allowed disabled:opacity-50"
+                className="flex flex-col items-start rounded-lg bg-[#11ad7d] px-4 py-3.5 text-sm font-semibold text-[#063f2d] transition-colors hover:bg-[#14c48e] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
               >
-                Dinheiro
+                <span className="flex items-center gap-2">
+                  <Banknote className="size-4" />
+                  Dinheiro
+                </span>
                 <span className="mt-0.5 text-xs font-normal opacity-70">F3</span>
               </button>
-              <button className="flex flex-col items-start rounded-lg border border-[#EF9F27] bg-[#2d2612] px-4 py-3.5 text-sm font-medium text-[#efab2d] transition-colors hover:bg-[#38301a]">
-                PIX
-                <span className="mt-0.5 text-xs opacity-70">F4</span>
+              <button
+                type="button"
+                disabled
+                aria-label="PIX (em breve)"
+                className="flex cursor-not-allowed flex-col items-start rounded-lg border border-warning/40 bg-[#2d2612]/50 px-4 py-3.5 text-sm font-medium text-warning/60"
+              >
+                <span className="flex items-center gap-2">
+                  <QrCode className="size-4" />
+                  PIX
+                </span>
+                <span className="mt-0.5 text-[11px] uppercase tracking-wide opacity-80">
+                  Em breve
+                </span>
               </button>
-              <button className="flex flex-col items-start rounded-lg border border-[#378ADD] bg-[#0e2337] px-4 py-3.5 text-sm font-medium text-[#66b1ff] transition-colors hover:bg-[#132d45]">
-                Cartão (Point)
-                <span className="mt-0.5 text-xs opacity-70">F5</span>
+              <button
+                type="button"
+                disabled
+                aria-label="Cartão Point (em breve)"
+                className="flex cursor-not-allowed flex-col items-start rounded-lg border border-info/40 bg-[#0e2337]/50 px-4 py-3.5 text-sm font-medium text-info/60"
+              >
+                <span className="flex items-center gap-2">
+                  <CreditCard className="size-4" />
+                  Cartão (Point)
+                </span>
+                <span className="mt-0.5 text-[11px] uppercase tracking-wide opacity-80">
+                  Em breve
+                </span>
               </button>
             </div>
 
             <div className="grid grid-cols-2 gap-2.5 px-6 py-4">
-              <button
+              <Button
+                variant="secondary"
                 onClick={() => void startNewSale()}
                 disabled={isStartingSale || isCurrentSaleEmpty}
-                className="rounded-lg bg-[#222834] px-3 py-3 text-sm font-medium text-[#d2d2cf] transition-colors hover:bg-[#2a313f] disabled:cursor-not-allowed disabled:opacity-60"
+                className="h-auto py-3"
               >
-                Nova venda{" "}
-                <span className="ml-1 rounded bg-[#101521] px-1.5 py-0.5 text-xs text-[#7f838a]">
+                <RotateCcw className="size-4" />
+                Nova venda
+                <span className="ml-1 rounded bg-background px-1.5 py-0.5 text-xs text-muted-foreground">
                   F1
                 </span>
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="destructive"
                 onClick={openCancelModal}
                 disabled={!saleId || saleStatus !== "open" || isCancellingSale}
-                className="rounded-lg border border-[#791F1F] bg-[#1f1215] px-3 py-3 text-sm font-medium text-[#ff8d8d] transition-colors hover:bg-[#2a181c] disabled:cursor-not-allowed disabled:opacity-50"
+                className="h-auto py-3"
               >
-                Cancelar{" "}
-                <span className="ml-1 rounded bg-[#101521] px-1.5 py-0.5 text-xs text-[#7f838a]">
+                <X className="size-4" />
+                Cancelar
+                <span className="ml-1 rounded bg-background px-1.5 py-0.5 text-xs text-muted-foreground">
                   Esc
                 </span>
-              </button>
+              </Button>
             </div>
           </div>
         </aside>
       </div>
 
-      {cashModal.open ? (
-        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-sm rounded-xl border border-[#2a2d35] bg-[#1a1d24] p-4">
-            <h2 className="text-lg font-medium">Pagamento em dinheiro</h2>
-            <p className="mt-1 text-sm text-[#9ea097]">
-              Total da venda: {formatCurrency(subtotal)}
-            </p>
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                void confirmCashPayment();
-              }}
-            >
-              <label className="mt-4 block text-sm text-[#9ea097]">
-                Valor recebido
-              </label>
-              <input
+      <Dialog
+        open={cashModal.open}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCashModal({ open: false, amountReceived: "", error: null });
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Banknote className="size-5 text-primary" />
+              Pagamento em dinheiro
+            </DialogTitle>
+            <DialogDescription>
+              Total da venda:{" "}
+              <Money value={subtotal} className="text-foreground" />
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="flex flex-col gap-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void confirmCashPayment();
+            }}
+          >
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="cash-amount">Valor recebido</Label>
+              <Input
+                id="cash-amount"
                 autoFocus
+                inputMode="decimal"
                 value={cashModal.amountReceived}
                 onChange={(event) =>
                   setCashModal((state) => ({
@@ -1266,61 +1376,72 @@ export default function SalePage(): JSX.Element {
                     amountReceived: event.target.value
                   }))
                 }
-                className="mt-1 w-full rounded-md border border-[#2a2d35] bg-[#22262f] px-3 py-2 text-sm outline-none focus:border-[#1D9E75]"
+                className="font-serif text-lg [font-variant-numeric:tabular-nums]"
               />
-              <p
-                className={`mt-2 text-sm ${changeAmount < 0 ? "text-[#ff8d8d]" : "text-[#7fd1b6]"}`}
-              >
-                Troco:{" "}
+            </div>
+            <p
+              className={`text-sm ${changeAmount < 0 ? "text-error-text" : "text-success-text"}`}
+            >
+              Troco:{" "}
+              <span className="font-serif [font-variant-numeric:tabular-nums]">
                 {changeAmount >= 0
                   ? formatCurrency(changeAmount)
                   : `-${formatCurrency(Math.abs(changeAmount))}`}
-              </p>
-              {cashModal.error ? (
-                <p className="mt-2 text-sm text-[#ff8d8d]">{cashModal.error}</p>
-              ) : null}
-              <div className="mt-4 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setCashModal({
-                      open: false,
-                      amountReceived: "",
-                      error: null
-                    })
-                  }
-                  className="rounded-md border border-[#3a3f4d] px-3 py-1.5 text-sm"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={isCashConfirmDisabled}
-                  className="rounded-md bg-[#1D9E75] px-3 py-1.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Confirmar pagamento
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      ) : null}
-
-      {unitModal.open && unitModal.product ? (
-        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-sm rounded-xl border border-[#2a2d35] bg-[#1a1d24] p-4">
-            <h2 className="text-lg font-medium">Quantidade</h2>
-            <p className="mt-1 text-sm text-[#9ea097]">
-              {unitModal.product.name}
+              </span>
             </p>
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                void confirmUnitSelection();
-              }}
-            >
-              <input
+            {cashModal.error ? (
+              <p role="alert" className="text-sm text-error-text">
+                {cashModal.error}
+              </p>
+            ) : null}
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() =>
+                  setCashModal({
+                    open: false,
+                    amountReceived: "",
+                    error: null
+                  })
+                }
+              >
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={isCashConfirmDisabled}>
+                Confirmar pagamento
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={unitModal.open && unitModal.product !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setUnitModal({ open: false, product: null, quantity: "1" });
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Quantidade</DialogTitle>
+            <DialogDescription>{unitModal.product?.name}</DialogDescription>
+          </DialogHeader>
+          <form
+            className="flex flex-col gap-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void confirmUnitSelection();
+            }}
+          >
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="unit-quantity">Quantidade (un)</Label>
+              <Input
+                id="unit-quantity"
                 autoFocus
+                inputMode="numeric"
                 value={unitModal.quantity}
                 onChange={(event) =>
                   setUnitModal((state) => ({
@@ -1328,46 +1449,54 @@ export default function SalePage(): JSX.Element {
                     quantity: event.target.value
                   }))
                 }
-                className="mt-4 w-full rounded-md border border-[#2a2d35] bg-[#22262f] px-3 py-2 text-sm outline-none focus:border-[#1D9E75]"
+                className="font-serif text-lg [font-variant-numeric:tabular-nums]"
               />
-              <div className="mt-4 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setUnitModal({ open: false, product: null, quantity: "1" })
-                  }
-                  className="rounded-md border border-[#3a3f4d] px-3 py-1.5 text-sm"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={isAddingItem}
-                  className="rounded-md bg-[#1D9E75] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
-                >
-                  Confirmar
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      ) : null}
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() =>
+                  setUnitModal({ open: false, product: null, quantity: "1" })
+                }
+              >
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={isAddingItem}>
+                Confirmar
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
-      {editModal.open && editModal.line ? (
-        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-sm rounded-xl border border-[#2a2d35] bg-[#1a1d24] p-4">
-            <h2 className="text-lg font-medium">Editar quantidade</h2>
-            <p className="mt-1 text-sm text-[#9ea097]">
-              {editModal.line.product}
-            </p>
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                void confirmEditSelection();
-              }}
-            >
-              <input
+      <Dialog
+        open={editModal.open && editModal.line !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditModal({ open: false, line: null, quantity: "" });
+            setEditModalError(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Editar quantidade</DialogTitle>
+            <DialogDescription>{editModal.line?.product}</DialogDescription>
+          </DialogHeader>
+          <form
+            className="flex flex-col gap-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void confirmEditSelection();
+            }}
+          >
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="edit-quantity">Nova quantidade</Label>
+              <Input
+                id="edit-quantity"
                 autoFocus
+                inputMode="decimal"
                 value={editModal.quantity}
                 onChange={(event) =>
                   setEditModal((state) => ({
@@ -1375,59 +1504,73 @@ export default function SalePage(): JSX.Element {
                     quantity: event.target.value
                   }))
                 }
-                className="mt-4 w-full rounded-md border border-[#2a2d35] bg-[#22262f] px-3 py-2 text-sm outline-none focus:border-[#1D9E75]"
+                className="font-serif text-lg [font-variant-numeric:tabular-nums]"
               />
-              {editModalError ? (
-                <p className="mt-2 text-sm text-[#ff8d8d]">{editModalError}</p>
-              ) : null}
-              <div className="mt-4 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditModal({ open: false, line: null, quantity: "" });
-                    setEditModalError(null);
-                  }}
-                  className="rounded-md border border-[#3a3f4d] px-3 py-1.5 text-sm"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={isUpdatingItem}
-                  className="rounded-md bg-[#1D9E75] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
-                >
-                  Confirmar
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      ) : null}
+            </div>
+            {editModalError ? (
+              <p role="alert" className="text-sm text-error-text">
+                {editModalError}
+              </p>
+            ) : null}
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setEditModal({ open: false, line: null, quantity: "" });
+                  setEditModalError(null);
+                }}
+              >
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={isUpdatingItem}>
+                Confirmar
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
-      {weightModal.open && weightModal.product ? (
-        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-xl border border-[#2a2d35] bg-[#1a1d24] p-4">
-            <h2 className="text-lg font-medium">Peso do produto</h2>
-            <p className="mt-1 text-sm text-[#9ea097]">
-              {weightModal.product.name}
+      <Dialog
+        open={weightModal.open && weightModal.product !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setWeightModal({
+              open: false,
+              product: null,
+              weight: "",
+              loading: false,
+              scaleError: null
+            });
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Scale className="size-5 text-primary" />
+              Peso do produto
+            </DialogTitle>
+            <DialogDescription>{weightModal.product?.name}</DialogDescription>
+          </DialogHeader>
+
+          {weightModal.loading ? (
+            <p className="text-sm text-text-secondary">
+              Lendo peso estável da balança…
             </p>
+          ) : null}
+          {weightModal.scaleError ? (
+            <p role="alert" className="text-sm text-error-text">
+              {weightModal.scaleError}
+            </p>
+          ) : null}
 
-            {weightModal.loading ? (
-              <p className="mt-4 text-sm text-[#c2c0b6]">
-                Lendo peso estável da balança...
-              </p>
-            ) : null}
-            {weightModal.scaleError ? (
-              <p className="mt-4 text-sm text-[#ff8d8d]">
-                {weightModal.scaleError}
-              </p>
-            ) : null}
-
-            <label className="mt-4 block text-sm text-[#9ea097]">
-              Peso (kg)
-            </label>
-            <input
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="weight-value">Peso (kg)</Label>
+            <Input
+              id="weight-value"
               autoFocus
+              inputMode="decimal"
               value={weightModal.weight}
               onChange={(event) =>
                 setWeightModal((state) => ({
@@ -1445,124 +1588,134 @@ export default function SalePage(): JSX.Element {
                   void confirmWeightSelection();
                 }
               }}
-              className="mt-1 w-full rounded-md border border-[#2a2d35] bg-[#22262f] px-3 py-2 text-sm outline-none focus:border-[#1D9E75]"
+              className="font-serif text-lg [font-variant-numeric:tabular-nums]"
             />
-
-            <div className="mt-4 flex justify-between gap-2">
-              <button
-                onClick={() => {
-                  if (weightModal.product) {
-                    void runScaleRead(weightModal.product);
-                  }
-                }}
-                className="rounded-md border border-[#378ADD] px-3 py-1.5 text-sm text-[#66b1ff]"
-              >
-                Re-ler balança
-              </button>
-
-              <div className="flex gap-2">
-                <button
-                  onClick={() =>
-                    setWeightModal({
-                      open: false,
-                      product: null,
-                      weight: "",
-                      loading: false,
-                      scaleError: null
-                    })
-                  }
-                  className="rounded-md border border-[#3a3f4d] px-3 py-1.5 text-sm"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={() => void confirmWeightSelection()}
-                  disabled={isAddingItem || weightModal.loading}
-                  className="rounded-md bg-[#1D9E75] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
-                >
-                  Confirmar
-                </button>
-              </div>
-            </div>
           </div>
-        </div>
-      ) : null}
 
-      {cancelModal.open ? (
-        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-sm rounded-xl border border-[#2a2d35] bg-[#1a1d24] p-4">
-            <h2 className="text-lg font-medium text-[#ff8cad]">
+          <DialogFooter className="justify-between">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                if (weightModal.product) {
+                  void runScaleRead(weightModal.product);
+                }
+              }}
+              className="text-info"
+            >
+              <RotateCcw className="size-4" />
+              Re-ler balança
+            </Button>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() =>
+                  setWeightModal({
+                    open: false,
+                    product: null,
+                    weight: "",
+                    loading: false,
+                    scaleError: null
+                  })
+                }
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                onClick={() => void confirmWeightSelection()}
+                disabled={isAddingItem || weightModal.loading}
+              >
+                Confirmar
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog
+        open={cancelModal.open}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCancelModal({ open: false, error: null });
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-cancelled-text">
               Cancelar venda
-            </h2>
-            <p className="mt-2 text-sm text-[#c2c0b6]">
-              Tem certeza que deseja cancelar esta venda? Esta ação define o
-              status como <strong>cancelled</strong> e não exclui o registro.
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja cancelar esta venda? A venda é marcada como
+              cancelada e o registro é mantido.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {cancelModal.error ? (
+            <p role="alert" className="text-sm text-error-text">
+              {cancelModal.error}
             </p>
-            {cancelModal.error ? (
-              <p className="mt-3 text-sm text-[#ff8d8d]">{cancelModal.error}</p>
-            ) : null}
-            <form
-              className="mt-4 flex justify-end gap-2"
-              onSubmit={(event) => {
+          ) : null}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isCancellingSale}>
+              Voltar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={isCancellingSale}
+              onClick={(event) => {
                 event.preventDefault();
                 void confirmCancelSale();
               }}
+              className="border border-danger-dark bg-[#1f1215] text-error-text hover:bg-[#2a181c]"
             >
-              <button
-                type="button"
-                onClick={() => setCancelModal({ open: false, error: null })}
-                className="rounded-md border border-[#3a3f4d] px-3 py-1.5 text-sm"
-              >
-                Voltar
-              </button>
-              <button
-                type="submit"
-                disabled={isCancellingSale}
-                className="rounded-md border border-[#ff0059] bg-[#2a0714] px-3 py-1.5 text-sm font-medium text-[#ff4f8a] disabled:opacity-60"
-              >
-                Confirmar cancelamento
-              </button>
-            </form>
-          </div>
-        </div>
-      ) : null}
+              Confirmar cancelamento
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
-      {printerWarning.open ? (
-        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-sm rounded-xl border border-border bg-panel p-4">
-            <h2 className="text-lg font-medium text-warning">
+      <Dialog
+        open={printerWarning.open}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPrinterWarning({ open: false, saleId: null, message: "" });
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-warning">
+              <Printer className="size-5" />
               Impressora offline
-            </h2>
-            <p className="mt-2 text-sm text-text-secondary">
+            </DialogTitle>
+            <DialogDescription>
               A venda foi concluída com sucesso, mas o comprovante não foi
               impresso.
+            </DialogDescription>
+          </DialogHeader>
+          {printerWarning.message ? (
+            <p className="rounded-lg bg-surface p-2 text-sm text-error-text">
+              {printerWarning.message}
             </p>
-            {printerWarning.message ? (
-              <p className="mt-3 rounded-lg bg-surface p-2 text-sm text-error-text">
-                {printerWarning.message}
-              </p>
-            ) : null}
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() =>
-                  setPrinterWarning({ open: false, saleId: null, message: "" })
-                }
-                className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-text-secondary"
-              >
-                Fechar
-              </button>
-              <button
-                type="button"
-                onClick={() => void retryPrinter()}
-                className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-white"
-              >
-                Reimprimir comprovante
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+          ) : null}
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() =>
+                setPrinterWarning({ open: false, saleId: null, message: "" })
+              }
+            >
+              Fechar
+            </Button>
+            <Button type="button" onClick={() => void retryPrinter()}>
+              <Printer className="size-4" />
+              Reimprimir comprovante
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

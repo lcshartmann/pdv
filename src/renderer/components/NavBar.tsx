@@ -1,17 +1,27 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
+import {
+  BarChart3,
+  Clock,
+  Package,
+  Settings as SettingsIcon,
+  ShoppingCart
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface NavItem {
   to: string;
   label: string;
+  icon: LucideIcon;
   hotkey?: string;
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { to: "/", label: "Venda", hotkey: "F1" },
-  { to: "/catalog", label: "Produtos", hotkey: "F6" },
-  { to: "/reports", label: "Relatórios", hotkey: "F7" },
-  { to: "/settings", label: "Configurações" }
+  { to: "/", label: "Venda", icon: ShoppingCart, hotkey: "F1" },
+  { to: "/catalog", label: "Produtos", icon: Package, hotkey: "F6" },
+  { to: "/reports", label: "Relatórios", icon: BarChart3, hotkey: "F7" },
+  { to: "/settings", label: "Configurações", icon: SettingsIcon }
 ];
 
 function useClockLabel(): string {
@@ -45,23 +55,27 @@ export default function NavBar(): JSX.Element {
   const clockLabel = useClockLabel();
 
   return (
-    <div className="flex items-center justify-between border-b border-[#2a2d35] bg-[#1a1d24] px-4 py-2">
-      <nav className="flex items-center gap-2 text-sm">
+    <header className="flex items-center justify-between border-b border-border bg-card px-4 py-2">
+      <nav className="flex items-center gap-1 text-sm">
         {NAV_ITEMS.map((item) => {
           const active = location.pathname === item.to;
+          const Icon = item.icon;
           return (
             <Link
               key={item.to}
               to={item.to}
-              className={
+              aria-current={active ? "page" : undefined}
+              className={cn(
+                "flex items-center gap-2 rounded-md px-3 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card",
                 active
-                  ? "rounded-md bg-[#22262f] px-3 py-1.5 text-[#e8e6df]"
-                  : "rounded-md px-3 py-1.5 text-[#c2c0b6] hover:bg-[#22262f] hover:text-[#e8e6df]"
-              }
+                  ? "bg-surface text-foreground"
+                  : "text-secondary-foreground hover:bg-surface hover:text-foreground"
+              )}
             >
+              <Icon className="size-4" />
               {item.label}
               {item.hotkey ? (
-                <span className="ml-2 rounded border border-[#343945] bg-[#0f131f] px-1.5 py-0.5 text-xs">
+                <span className="ml-1 rounded border border-input bg-[#0f131f] px-1.5 py-0.5 text-xs text-muted-foreground">
                   {item.hotkey}
                 </span>
               ) : null}
@@ -69,7 +83,10 @@ export default function NavBar(): JSX.Element {
           );
         })}
       </nav>
-      <span className="text-sm text-[#9d9c99]">{clockLabel}</span>
-    </div>
+      <span className="flex items-center gap-1.5 text-sm text-muted-foreground [font-variant-numeric:tabular-nums]">
+        <Clock className="size-3.5" />
+        {clockLabel}
+      </span>
+    </header>
   );
 }

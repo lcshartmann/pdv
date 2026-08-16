@@ -1,4 +1,10 @@
 import type { ReactNode } from "react";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle
+} from "@/components/ui/card";
 
 interface PanelProps {
   title: string;
@@ -7,9 +13,11 @@ interface PanelProps {
 
 export default function Panel({ title, children }: PanelProps): JSX.Element {
   return (
-    <section className="rounded-xl border border-[#2a2d35] bg-[#22262f] p-4">
-      <h2 className="mb-3 text-base font-medium">{title}</h2>
-      {children}
-    </section>
+    <Card className="bg-surface">
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+      </CardHeader>
+      <CardContent>{children}</CardContent>
+    </Card>
   );
 }

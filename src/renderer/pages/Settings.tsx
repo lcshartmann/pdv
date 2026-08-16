@@ -23,6 +23,7 @@ import {
   SelectTrigger,
   SelectValue
 } from "../components/ui/select";
+import { buttonVariants } from "@/components/ui/button";
 import { cn } from "../lib/utils";
 import type {
   AppSettings,
@@ -87,15 +88,14 @@ const SECTION_KEYS: Record<Exclude<SectionId, "data">, Array<keyof AppSettings>>
 
 const BAUD_RATES = [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200];
 
+// Reaproveita os tokens/variantes do Button do shadcn para uniformizar os
+// controles da tela de configurações sem trocar cada JSX individualmente.
 const inputClass =
-  "h-10 w-full rounded-lg border border-[#343945] bg-[#0f131f] px-3 py-2 text-sm text-[#e8e6df] outline-none transition-colors placeholder:text-[#6b6a65] hover:border-[#3f4552] focus:border-[#2ad6a2] focus:ring-2 focus:ring-[#2ad6a2]/25";
-const primaryBtn =
-  "inline-flex items-center gap-2 rounded-lg bg-[#1D9E75] px-4 py-2 text-sm font-medium text-[#08130f] transition-colors hover:bg-[#23b487] disabled:cursor-not-allowed disabled:opacity-50";
-const ghostBtn =
-  "inline-flex items-center gap-2 rounded-lg border border-[#343945] bg-[#22262f] px-3.5 py-2 text-sm text-[#c2c0b6] transition-colors hover:border-[#3f4552] hover:text-[#e8e6df] disabled:cursor-not-allowed disabled:opacity-50";
-const dangerBtn =
-  "inline-flex items-center gap-2 rounded-lg border border-[#5a2222] bg-[#1f1215] px-3.5 py-2 text-sm font-medium text-[#ff8d8d] transition-colors hover:bg-[#2a181c] disabled:cursor-not-allowed disabled:opacity-50";
-const cardClass = "rounded-xl border border-[#2a2d35] bg-[#181b22] p-5";
+  "h-10 w-full rounded-lg border border-input bg-[#0f131f] px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground hover:border-[#3f4552] focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30";
+const primaryBtn = buttonVariants({ variant: "default" });
+const ghostBtn = buttonVariants({ variant: "outline" });
+const dangerBtn = buttonVariants({ variant: "destructive" });
+const cardClass = "rounded-xl border border-border bg-card p-5";
 
 function Field({
   label,
@@ -108,9 +108,13 @@ function Field({
 }): JSX.Element {
   return (
     <label className="flex flex-col gap-1.5">
-      <span className="text-sm font-medium text-[#c2c0b6]">{label}</span>
+      <span className="text-sm font-medium text-secondary-foreground">
+        {label}
+      </span>
       {children}
-      {hint ? <span className="text-xs text-[#6b6a65]">{hint}</span> : null}
+      {hint ? (
+        <span className="text-xs text-muted-foreground">{hint}</span>
+      ) : null}
     </label>
   );
 }
@@ -126,14 +130,14 @@ function SectionHeader({
 }): JSX.Element {
   return (
     <div className="flex items-start gap-3">
-      <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-[#1D9E75]/30 bg-[#123028] text-[#7fd1b6]">
-        <Icon className="h-5 w-5" />
+      <div className="grid size-11 shrink-0 place-items-center rounded-xl border border-primary/30 bg-[#123028] text-success-text">
+        <Icon className="size-5" />
       </div>
       <div>
-        <h1 className="font-serif text-[26px] leading-tight text-[#f3f1eb]">
+        <h1 className="font-serif text-[26px] leading-tight text-foreground">
           {title}
         </h1>
-        <p className="text-sm text-[#8d8c89]">{desc}</p>
+        <p className="text-sm text-muted-foreground">{desc}</p>
       </div>
     </div>
   );

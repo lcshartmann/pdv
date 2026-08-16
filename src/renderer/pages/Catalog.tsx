@@ -900,7 +900,7 @@ export default function Catalog() {
           <Input
             ref={searchRef}
             className="pl-8 pr-14"
-              placeholder="Buscar por nome ou código de barras..."
+              placeholder="Buscar por nome ou código de barras…"
               value={search}
               onChange={(e: ChangeEvent<HTMLInputElement>) => uiStoreActions.setCatalogSearch(e.target.value)}
             />
