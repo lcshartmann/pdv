@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import type { SaleStatus } from "../../shared/types";
+import type { DiscountBasis, SaleStatus } from "../../shared/types";
 
 export type CatalogStockFilter = "all" | "low" | "out";
 export type CatalogCategoryFilter = number | "Todos";
@@ -11,7 +11,13 @@ export interface SaleCartLine {
   detail: string;
   quantityLabel: string;
   quantityValue: number;
+  /** Preço unitário original (sem desconto). */
   unitPrice: number;
+  /** Reais abatidos na linha; 0 quando não há desconto. */
+  discountAmount: number;
+  /** Base do desconto aplicado; null quando a linha não tem desconto. */
+  discountBasis: DiscountBasis | null;
+  /** Total líquido da linha (já com o desconto). */
   total: number;
 }
 

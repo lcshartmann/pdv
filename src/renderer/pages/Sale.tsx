@@ -10,6 +10,7 @@ import {
   RotateCcw,
   Scale,
   Search,
+  Tag,
   Trash2,
   X
 } from "lucide-react";
@@ -36,7 +37,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle
 } from "@/components/ui/alert-dialog";
-import type { Product, SaleItem, UnitType } from "../../shared/types";
+import type {
+  DiscountBasis,
+  Product,
+  SaleItem,
+  UnitType
+} from "../../shared/types";
 
 interface SaleLine {
   saleItemId: number;
@@ -46,6 +52,8 @@ interface SaleLine {
   quantityLabel: string;
   quantityValue: number;
   unitPrice: number;
+  discountAmount: number;
+  discountBasis: DiscountBasis | null;
   total: number;
 }
 
@@ -67,6 +75,14 @@ interface EditModalState {
   open: boolean;
   line: SaleLine | null;
   quantity: string;
+}
+
+interface DiscountModalState {
+  open: boolean;
+  line: SaleLine | null;
+  basis: DiscountBasis;
+  newPrice: string;
+  error: string | null;
 }
 
 interface CancelModalState {
@@ -149,8 +165,18 @@ function createLine(item: SaleItem, product: Product): SaleLine {
     quantityLabel: formatQuantity(item.quantity, product.unit_type),
     quantityValue: item.quantity,
     unitPrice: item.unit_price,
+    discountAmount: item.discount_amount,
+    discountBasis: item.discount_basis,
     total: item.total
   };
+}
+
+// Preço unitário já com o desconto aplicado (usado no display "de → por").
+function effectiveUnitPrice(line: SaleLine): number {
+  if (line.quantityValue <= 0) {
+    return line.unitPrice;
+  }
+  return line.total / line.quantityValue;
 }
 
 export default function SalePage(): JSX.Element {
@@ -189,6 +215,14 @@ export default function SalePage(): JSX.Element {
     quantity: ""
   });
   const [editModalError, setEditModalError] = useState<string | null>(null);
+  const [discountModal, setDiscountModal] = useState<DiscountModalState>({
+    open: false,
+    line: null,
+    basis: "unit",
+    newPrice: "",
+    error: null
+  });
+  const [isSavingDiscount, setIsSavingDiscount] = useState(false);
   const [cancelModal, setCancelModal] = useState<CancelModalState>({
     open: false,
     error: null
@@ -402,8 +436,23 @@ export default function SalePage(): JSX.Element {
     return () => window.clearInterval(timer);
   }, [syncPrinterStatus]);
 
+  // Total líquido da venda (já com descontos) — é o valor a pagar.
   const subtotal = useMemo(
     () => saleLines.reduce((acc, line) => acc + line.total, 0),
+    [saleLines]
+  );
+  // Subtotal bruto (aos preços originais) e a soma dos descontos por linha,
+  // exibidos na linha "Desconto" do cabeçalho.
+  const grossSubtotal = useMemo(
+    () =>
+      saleLines.reduce(
+        (acc, line) => acc + line.quantityValue * line.unitPrice,
+        0
+      ),
+    [saleLines]
+  );
+  const discountTotal = useMemo(
+    () => saleLines.reduce((acc, line) => acc + line.discountAmount, 0),
     [saleLines]
   );
   const unitCount = useMemo(
@@ -595,6 +644,17 @@ export default function SalePage(): JSX.Element {
       return true;
     }
 
+    if (discountModal.open) {
+      setDiscountModal({
+        open: false,
+        line: null,
+        basis: "unit",
+        newPrice: "",
+        error: null
+      });
+      return true;
+    }
+
     if (weightModal.open) {
       setWeightModal({
         open: false,
@@ -615,6 +675,7 @@ export default function SalePage(): JSX.Element {
   }, [
     cancelModal.open,
     cashModal.open,
+    discountModal.open,
     editModal.open,
     printerWarning.open,
     unitModal.open,
@@ -626,6 +687,7 @@ export default function SalePage(): JSX.Element {
     printerWarning.open ||
     unitModal.open ||
     editModal.open ||
+    discountModal.open ||
     weightModal.open ||
     cancelModal.open;
 
@@ -1002,6 +1064,91 @@ export default function SalePage(): JSX.Element {
     }
   }, [editModal, products, saleId, saleStatus]);
 
+  const openDiscountModal = useCallback((line: SaleLine): void => {
+    // Pré-preenche com o desconto atual (se houver), senão com o preço cheio.
+    const basis: DiscountBasis = line.discountBasis ?? "unit";
+    const currentPrice =
+      line.discountBasis === "total"
+        ? line.total
+        : line.discountBasis === "unit"
+          ? effectiveUnitPrice(line)
+          : line.unitPrice;
+    setDiscountModal({
+      open: true,
+      line,
+      basis,
+      newPrice: currentPrice.toFixed(2).replace(".", ","),
+      error: null
+    });
+  }, []);
+
+  const persistDiscount = useCallback(
+    async (
+      line: SaleLine,
+      basis: DiscountBasis | "none",
+      newPrice?: number
+    ): Promise<void> => {
+      if (!saleId || saleStatus !== "open") {
+        return;
+      }
+
+      setIsSavingDiscount(true);
+      try {
+        const { item } = await window.api.saleSetItemDiscount({
+          saleId,
+          saleItemId: line.saleItemId,
+          basis,
+          newPrice
+        });
+        const product = products.find((entry) => entry.id === item.product_id);
+        if (!product) {
+          throw new Error("Produto do item não encontrado.");
+        }
+        uiStoreActions.upsertSaleLine(createLine(item, product));
+        setDiscountModal({
+          open: false,
+          line: null,
+          basis: "unit",
+          newPrice: "",
+          error: null
+        });
+      } catch (error) {
+        setDiscountModal((state) => ({
+          ...state,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Falha ao aplicar desconto."
+        }));
+      } finally {
+        setIsSavingDiscount(false);
+      }
+    },
+    [products, saleId, saleStatus]
+  );
+
+  const confirmDiscount = useCallback((): void => {
+    if (!discountModal.line) {
+      return;
+    }
+    const newPrice = Number(discountModal.newPrice.replace(",", "."));
+    if (!Number.isFinite(newPrice) || newPrice <= 0) {
+      setDiscountModal((state) => ({
+        ...state,
+        error: "Novo preço inválido."
+      }));
+      return;
+    }
+    void persistDiscount(discountModal.line, discountModal.basis, newPrice);
+  }, [discountModal.basis, discountModal.line, discountModal.newPrice, persistDiscount]);
+
+  const removeDiscount = useCallback((): void => {
+    if (!discountModal.line) {
+      return;
+    }
+    void persistDiscount(discountModal.line, "none");
+  }, [discountModal.line, persistDiscount]);
+
   // Oferece "Desfazer" após remover: re-adiciona o produto com a mesma
   // quantidade (gera um novo item de venda, mas restaura o carrinho).
   const offerUndoRemoval = useCallback(
@@ -1165,6 +1312,28 @@ export default function SalePage(): JSX.Element {
         ? "text-[#7dc8ff]"
         : "text-[#7fd1b6]";
 
+  // Preview do modal de desconto (recalculado a cada render enquanto aberto).
+  const discountLine = discountModal.line;
+  const discountUnitLabel =
+    discountLine && productUnitById.get(discountLine.productId) === "kg"
+      ? "kg"
+      : "un";
+  const discountGross = discountLine
+    ? discountLine.quantityValue * discountLine.unitPrice
+    : 0;
+  const discountNewPriceValue = Number(
+    discountModal.newPrice.replace(",", ".")
+  );
+  const discountPreviewNewTotal =
+    discountModal.basis === "unit"
+      ? (discountLine?.quantityValue ?? 0) * discountNewPriceValue
+      : discountNewPriceValue;
+  const discountPreviewAmount = discountGross - discountPreviewNewTotal;
+  const discountPreviewValid =
+    Number.isFinite(discountNewPriceValue) &&
+    discountNewPriceValue > 0 &&
+    discountPreviewAmount > 0;
+
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[#111318] text-[#e8e6df]">
       <NavBar />
@@ -1290,12 +1459,29 @@ export default function SalePage(): JSX.Element {
                 {statusLabel}
               </span>
             </div>
-            <span className="text-xs text-[#8d8c89]">
-              Desconto <span className="text-[#f4ae2f]">− {formatCurrency(0)}</span>
+            <span className="flex items-baseline gap-3 text-xs text-[#8d8c89]">
+              {discountTotal > 0 ? (
+                <span>
+                  Subtotal{" "}
+                  <span className="text-[#c2c0b6]">
+                    {formatCurrency(grossSubtotal)}
+                  </span>
+                </span>
+              ) : null}
+              <span>
+                Desconto{" "}
+                <span
+                  className={
+                    discountTotal > 0 ? "text-[#f4ae2f]" : "text-[#5b5c58]"
+                  }
+                >
+                  − {formatCurrency(discountTotal)}
+                </span>
+              </span>
             </span>
           </div>
 
-          <div className="grid grid-cols-[1fr_150px_120px_150px_92px] items-baseline border-b border-[#2a2d35] px-6 py-2.5 text-[11px] font-medium uppercase tracking-[0.12em] text-[#8f8e8b]">
+          <div className="grid grid-cols-[1fr_150px_110px_150px_128px] items-baseline border-b border-[#2a2d35] px-6 py-2.5 text-[11px] font-medium uppercase tracking-[0.12em] text-[#8f8e8b]">
             <span>Produto</span>
             <span className="text-right">Preço un.</span>
             <span className="text-center">Qtd</span>
@@ -1317,13 +1503,28 @@ export default function SalePage(): JSX.Element {
               saleLines.map((line) => (
                 <div
                   key={line.saleItemId}
-                  className="grid grid-cols-[1fr_150px_120px_150px_92px] items-center border-b border-[#1e222c] px-6 py-3 transition-colors hover:bg-[#141924]"
+                  className="grid grid-cols-[1fr_150px_110px_150px_128px] items-center border-b border-[#1e222c] px-6 py-3 transition-colors hover:bg-[#141924]"
                 >
                   <p className="min-w-0 truncate text-[15px] font-medium text-[#e8e6df]">
                     {line.product}
                   </p>
                   <span className="text-right text-sm text-[#c2c0b6]">
-                    <Money value={line.unitPrice} />
+                    {line.discountBasis === "unit" ? (
+                      <Money
+                        value={line.unitPrice}
+                        className="mr-1 text-xs text-[#7f807c] line-through"
+                      />
+                    ) : null}
+                    <Money
+                      value={
+                        line.discountBasis === "unit"
+                          ? effectiveUnitPrice(line)
+                          : line.unitPrice
+                      }
+                      className={
+                        line.discountBasis === "unit" ? "text-[#f4ae2f]" : ""
+                      }
+                    />
                     <span className="text-[#7f807c]">
                       /{productUnitById.get(line.productId) === "kg" ? "kg" : "un"}
                     </span>
@@ -1331,11 +1532,35 @@ export default function SalePage(): JSX.Element {
                   <span className="text-center text-sm tabular-nums text-[#d4d3cf]">
                     {line.quantityLabel}
                   </span>
-                  <Money
-                    value={line.total}
-                    className="text-right text-[15px] text-[#e8e6df]"
-                  />
+                  <span className="text-right text-[15px] text-[#e8e6df]">
+                    {line.discountBasis === "total" ? (
+                      <Money
+                        value={line.quantityValue * line.unitPrice}
+                        className="mr-1 text-xs text-[#7f807c] line-through"
+                      />
+                    ) : null}
+                    <Money
+                      value={line.total}
+                      className={
+                        line.discountBasis === "total" ? "text-[#f4ae2f]" : ""
+                      }
+                    />
+                  </span>
                   <div className="flex items-center justify-end gap-1.5">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      aria-label={`Desconto em ${line.product}`}
+                      onClick={() => openDiscountModal(line)}
+                      disabled={saleStatus !== "open"}
+                      className={`size-8 ${
+                        line.discountBasis
+                          ? "border-[#f4ae2f]/50 text-[#f4ae2f] hover:text-[#f4ae2f]"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      <Tag className="size-4" />
+                    </Button>
                     <Button
                       variant="outline"
                       size="icon"
@@ -1662,6 +1887,169 @@ export default function SalePage(): JSX.Element {
               <Button type="submit" disabled={isUpdatingItem}>
                 Confirmar
               </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={discountModal.open && discountModal.line !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDiscountModal({
+              open: false,
+              line: null,
+              basis: "unit",
+              newPrice: "",
+              error: null
+            });
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Tag className="size-5 text-[#f4ae2f]" />
+              Desconto
+            </DialogTitle>
+            <DialogDescription>{discountModal.line?.product}</DialogDescription>
+          </DialogHeader>
+          <form
+            className="flex flex-col gap-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              confirmDiscount();
+            }}
+          >
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant={discountModal.basis === "unit" ? "default" : "outline"}
+                onClick={() =>
+                  setDiscountModal((state) => ({
+                    ...state,
+                    basis: "unit",
+                    error: null
+                  }))
+                }
+                className="flex-1"
+              >
+                Preço unitário
+              </Button>
+              <Button
+                type="button"
+                variant={
+                  discountModal.basis === "total" ? "default" : "outline"
+                }
+                onClick={() =>
+                  setDiscountModal((state) => ({
+                    ...state,
+                    basis: "total",
+                    error: null
+                  }))
+                }
+                className="flex-1"
+              >
+                Total da linha
+              </Button>
+            </div>
+
+            <p className="text-sm text-text-secondary">
+              {discountModal.basis === "unit" ? (
+                <>
+                  Preço atual:{" "}
+                  <Money
+                    value={discountModal.line?.unitPrice ?? 0}
+                    className="text-foreground"
+                  />
+                  /{discountUnitLabel}
+                </>
+              ) : (
+                <>
+                  Total atual:{" "}
+                  <Money value={discountGross} className="text-foreground" />
+                </>
+              )}
+            </p>
+
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="discount-price">
+                {discountModal.basis === "unit"
+                  ? `Novo preço (${discountUnitLabel})`
+                  : "Novo total da linha"}
+              </Label>
+              <Input
+                id="discount-price"
+                autoFocus
+                inputMode="decimal"
+                value={discountModal.newPrice}
+                onChange={(event) =>
+                  setDiscountModal((state) => ({
+                    ...state,
+                    newPrice: event.target.value,
+                    error: null
+                  }))
+                }
+                className="font-serif text-lg [font-variant-numeric:tabular-nums]"
+              />
+            </div>
+
+            {discountPreviewValid ? (
+              <p className="text-sm text-[#f4ae2f]">
+                Desconto:{" "}
+                <span className="font-serif [font-variant-numeric:tabular-nums]">
+                  −{formatCurrency(discountPreviewAmount)}
+                </span>{" "}
+                · Novo total:{" "}
+                <span className="font-serif [font-variant-numeric:tabular-nums]">
+                  {formatCurrency(discountPreviewNewTotal)}
+                </span>
+              </p>
+            ) : null}
+
+            {discountModal.error ? (
+              <p role="alert" className="text-sm text-error-text">
+                {discountModal.error}
+              </p>
+            ) : null}
+
+            <DialogFooter className="justify-between">
+              {discountModal.line?.discountBasis ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={removeDiscount}
+                  disabled={isSavingDiscount}
+                  className="text-error-text hover:text-error-text"
+                >
+                  Remover desconto
+                </Button>
+              ) : (
+                <span />
+              )}
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() =>
+                    setDiscountModal({
+                      open: false,
+                      line: null,
+                      basis: "unit",
+                      newPrice: "",
+                      error: null
+                    })
+                  }
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={isSavingDiscount || !discountPreviewValid}
+                >
+                  Aplicar desconto
+                </Button>
+              </div>
             </DialogFooter>
           </form>
         </DialogContent>

@@ -2,6 +2,13 @@ export type UnitType = "unit" | "kg";
 export type SaleStatus = "open" | "completed" | "cancelled";
 export type PaymentMethod = "cash" | "pix" | "card";
 export type PaymentStatus = "confirmed" | "pending";
+/**
+ * Base sobre a qual um desconto de item foi aplicado. Determina como o desconto
+ * é recalculado quando a quantidade da linha muda:
+ * - "unit": preserva o preço unitário efetivo (recalcula os reais).
+ * - "total": preserva o valor absoluto abatido em reais.
+ */
+export type DiscountBasis = "unit" | "total";
 
 export interface Product {
   id: number;
@@ -26,8 +33,13 @@ export interface SaleItem {
   sale_id: number;
   product_id: number;
   quantity: number;
+  /** Preço unitário original (nunca é alterado por desconto). */
   unit_price: number;
+  /** Reais abatidos na linha; 0 quando não há desconto. */
   discount_amount: number;
+  /** Base do desconto; null quando a linha não tem desconto. */
+  discount_basis: DiscountBasis | null;
+  /** quantity * unit_price - discount_amount, arredondado a centavos. */
   total: number;
 }
 
@@ -69,6 +81,19 @@ export interface SaleUpdateItemQuantityRequest {
   saleId: number;
   saleItemId: number;
   quantity: number;
+}
+
+export interface SaleSetItemDiscountRequest {
+  saleId: number;
+  saleItemId: number;
+  /** "unit" ou "total" para aplicar; "none" para remover o desconto da linha. */
+  basis: DiscountBasis | "none";
+  /**
+   * Novo preço final desejado — por unidade (basis "unit") ou o total da linha
+   * (basis "total"). Ignorado quando basis é "none". Deve ser menor que o
+   * original (desconto só reduz) e maior que zero.
+   */
+  newPrice?: number;
 }
 
 export interface SaleCompleteRequest {
@@ -375,6 +400,7 @@ export interface RendererApi {
   saleRemoveItem: (payload: SaleRemoveItemRequest) => Promise<void>;
   saleRemoveLastItem: (payload: SaleRemoveLastItemRequest) => Promise<void>;
   saleUpdateItemQuantity: (payload: SaleUpdateItemQuantityRequest) => Promise<SaleAddItemResponse>;
+  saleSetItemDiscount: (payload: SaleSetItemDiscountRequest) => Promise<SaleAddItemResponse>;
   saleComplete: (payload: SaleCompleteRequest) => Promise<SaleCompleteResponse>;
   saleCancel: (payload: SaleCancelRequest) => Promise<void>;
   productList: () => Promise<Product[]>;

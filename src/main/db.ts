@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS sale_item (
   quantity        REAL    NOT NULL CHECK(quantity > 0),
   unit_price      REAL    NOT NULL,
   discount_amount REAL    NOT NULL DEFAULT 0,
+  discount_basis  TEXT    CHECK(discount_basis IN ('unit', 'total')),
   total           REAL    NOT NULL
 );
 
@@ -110,6 +111,19 @@ function seedInitialData(db: Database.Database): void {
   tx();
 }
 
+/**
+ * Migrações idempotentes para bancos já existentes (o schema com IF NOT EXISTS
+ * não recria colunas). Adiciona `sale_item.discount_basis` quando ausente.
+ */
+function runMigrations(db: Database.Database): void {
+  const columns = db
+    .prepare("PRAGMA table_info(sale_item)")
+    .all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === "discount_basis")) {
+    db.exec("ALTER TABLE sale_item ADD COLUMN discount_basis TEXT");
+  }
+}
+
 export function clearStock(db: Database.Database){
   const update = db.prepare(`
     UPDATE product SET stock_qty = 0
@@ -125,6 +139,7 @@ export function initializeDatabase(userDataPath: string): Database.Database {
   const dbPath = path.join(userDataPath, "market-pos.db");
   const db = new Database(dbPath);
   db.exec(schema);
+  runMigrations(db);
   seedInitialData(db);
   dbInstance = db;
   dbFilePath = dbPath;

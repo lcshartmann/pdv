@@ -37,6 +37,7 @@ import type {
   SaleItem,
   SaleRemoveItemRequest,
   SaleRemoveLastItemRequest,
+  SaleSetItemDiscountRequest,
   ScaleStatus,
   SaleUpdateItemQuantityRequest,
   AppSettings,
@@ -81,29 +82,32 @@ export function registerIpcHandlers(
   db: Database.Database,
   services: IpcServices
 ): void {
+  // Dinheiro é tratado em centavos: arredonda a 2 casas para evitar acúmulo de
+  // erro de ponto flutuante nos totais e descontos.
+  const round2 = (value: number): number => Math.round(value * 100) / 100;
+
   const recalculateSaleTotals = (saleId: number): void => {
+    // Subtotal é bruto (soma de quantidade × preço original); o desconto da
+    // venda é a soma dos descontos por linha; total = subtotal − desconto.
     const aggregate = db
       .prepare(
         `
         SELECT
-          COALESCE(SUM(sale_item.total), 0) AS subtotal,
-          COALESCE(MAX(sale.discount_amount), 0) AS discount_amount
+          COALESCE(SUM(quantity * unit_price), 0) AS subtotal,
+          COALESCE(SUM(discount_amount), 0) AS discount_amount
         FROM sale_item
-        JOIN sale ON sale.id = sale_item.sale_id
-        WHERE sale_item.sale_id = ?
+        WHERE sale_id = ?
         `
       )
       .get(saleId) as SaleAggregate;
 
-    const subtotal = Number(aggregate.subtotal ?? 0);
-    const discount = Number(aggregate.discount_amount ?? 0);
-    const total = subtotal - discount;
+    const subtotal = round2(Number(aggregate.subtotal ?? 0));
+    const discount = round2(Number(aggregate.discount_amount ?? 0));
+    const total = round2(subtotal - discount);
 
-    db.prepare("UPDATE sale SET subtotal = ?, total = ? WHERE id = ?").run(
-      subtotal,
-      total,
-      saleId
-    );
+    db.prepare(
+      "UPDATE sale SET subtotal = ?, discount_amount = ?, total = ? WHERE id = ?"
+    ).run(subtotal, discount, total, saleId);
   };
 
   ipcMain.handle("sale:create", () => {
@@ -132,20 +136,20 @@ export function registerIpcHandlers(
       throw new Error("Quantity must be greater than 0.");
     }
 
+    // Só mescla em linhas sem desconto: uma linha com desconto por unidade ou
+    // total tem preço efetivo próprio e não deve absorver novas unidades.
     const existing = db
       .prepare(
-        "SELECT id, quantity, discount_amount FROM sale_item WHERE sale_id = ? AND product_id = ? AND unit_price = ? LIMIT 1"
+        "SELECT id, quantity FROM sale_item WHERE sale_id = ? AND product_id = ? AND unit_price = ? AND discount_amount = 0 LIMIT 1"
       )
       .get(payload.saleId, payload.productId, product.price_per_unit) as
-      | { id: number; quantity: number; discount_amount: number }
+      | { id: number; quantity: number }
       | undefined;
 
     let itemId: number;
     if (existing) {
       const newQuantity = Number(existing.quantity) + quantity;
-      const newTotal =
-        newQuantity * Number(product.price_per_unit) -
-        Number(existing.discount_amount);
+      const newTotal = round2(newQuantity * Number(product.price_per_unit));
       db.prepare(
         "UPDATE sale_item SET quantity = ?, total = ? WHERE id = ?"
       ).run(newQuantity, newTotal, existing.id);
@@ -153,14 +157,14 @@ export function registerIpcHandlers(
     } else {
       const info = db
         .prepare(
-          "INSERT INTO sale_item (sale_id, product_id, quantity, unit_price, discount_amount, total) VALUES (?, ?, ?, ?, 0, ?)"
+          "INSERT INTO sale_item (sale_id, product_id, quantity, unit_price, discount_amount, discount_basis, total) VALUES (?, ?, ?, ?, 0, NULL, ?)"
         )
         .run(
           payload.saleId,
           payload.productId,
           quantity,
           product.price_per_unit,
-          quantity * Number(product.price_per_unit)
+          round2(quantity * Number(product.price_per_unit))
         );
       itemId = Number(info.lastInsertRowid);
     }
@@ -204,22 +208,97 @@ export function registerIpcHandlers(
 
       const existing = db
         .prepare(
-          "SELECT id, unit_price, discount_amount FROM sale_item WHERE id = ? AND sale_id = ?"
+          "SELECT id, quantity, unit_price, discount_amount, discount_basis FROM sale_item WHERE id = ? AND sale_id = ?"
         )
         .get(payload.saleItemId, payload.saleId) as
-        | { id: number; unit_price: number; discount_amount: number }
+        | {
+            id: number;
+            quantity: number;
+            unit_price: number;
+            discount_amount: number;
+            discount_basis: "unit" | "total" | null;
+          }
         | undefined;
 
       if (!existing) {
         throw new Error("Sale item not found.");
       }
 
-      const total =
-        quantity * Number(existing.unit_price) -
-        Number(existing.discount_amount);
+      const unitPrice = Number(existing.unit_price);
+      const grossTotal = round2(quantity * unitPrice);
+      let discount = Number(existing.discount_amount);
+
+      if (existing.discount_basis === "unit") {
+        // Preserva o preço unitário efetivo: recalcula os reais para a nova qtd.
+        const previousQuantity = Number(existing.quantity);
+        const perUnitDiscount =
+          previousQuantity > 0 ? discount / previousQuantity : 0;
+        discount = round2(perUnitDiscount * quantity);
+      }
+      // basis "total" (ou sem desconto): mantém o valor absoluto abatido.
+      // Nunca deixa o desconto ultrapassar o bruto (total não fica negativo).
+      discount = Math.min(round2(discount), grossTotal);
+
+      const total = round2(grossTotal - discount);
       db.prepare(
-        "UPDATE sale_item SET quantity = ?, total = ? WHERE id = ? AND sale_id = ?"
-      ).run(quantity, total, payload.saleItemId, payload.saleId);
+        "UPDATE sale_item SET quantity = ?, discount_amount = ?, total = ? WHERE id = ? AND sale_id = ?"
+      ).run(quantity, discount, total, payload.saleItemId, payload.saleId);
+
+      recalculateSaleTotals(payload.saleId);
+
+      const item = db
+        .prepare("SELECT * FROM sale_item WHERE id = ?")
+        .get(payload.saleItemId) as SaleItem;
+      return { item } satisfies SaleAddItemResponse;
+    }
+  );
+
+  ipcMain.handle(
+    "sale:setItemDiscount",
+    (_event, payload: SaleSetItemDiscountRequest) => {
+      const existing = db
+        .prepare(
+          "SELECT id, quantity, unit_price FROM sale_item WHERE id = ? AND sale_id = ?"
+        )
+        .get(payload.saleItemId, payload.saleId) as
+        | { id: number; quantity: number; unit_price: number }
+        | undefined;
+
+      if (!existing) {
+        throw new Error("Sale item not found.");
+      }
+
+      const quantity = Number(existing.quantity);
+      const unitPrice = Number(existing.unit_price);
+      const grossTotal = round2(quantity * unitPrice);
+
+      let discountAmount = 0;
+      let basis: "unit" | "total" | null = null;
+
+      if (payload.basis !== "none") {
+        const newPrice = Number(payload.newPrice);
+        if (!Number.isFinite(newPrice) || newPrice <= 0) {
+          throw new Error("Novo preço deve ser maior que zero.");
+        }
+
+        if (payload.basis === "unit") {
+          if (newPrice >= unitPrice) {
+            throw new Error("O desconto deve reduzir o preço unitário.");
+          }
+          discountAmount = round2((unitPrice - newPrice) * quantity);
+        } else {
+          if (newPrice >= grossTotal) {
+            throw new Error("O desconto deve reduzir o total da linha.");
+          }
+          discountAmount = round2(grossTotal - newPrice);
+        }
+        basis = payload.basis;
+      }
+
+      const total = round2(grossTotal - discountAmount);
+      db.prepare(
+        "UPDATE sale_item SET discount_amount = ?, discount_basis = ?, total = ? WHERE id = ? AND sale_id = ?"
+      ).run(discountAmount, basis, total, payload.saleItemId, payload.saleId);
 
       recalculateSaleTotals(payload.saleId);
 
