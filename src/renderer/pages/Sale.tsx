@@ -168,6 +168,9 @@ export default function SalePage(): JSX.Element {
   const [isUpdatingItem, setIsUpdatingItem] = useState(false);
   const [isCancellingSale, setIsCancellingSale] = useState(false);
   const [isProcessingCashPayment, setIsProcessingCashPayment] = useState(false);
+  // Pagamentos sem troco (PIX/cartão): apenas registram o meio para relatório.
+  const [isProcessingDirectPayment, setIsProcessingDirectPayment] =
+    useState(false);
   const [unitModal, setUnitModal] = useState<UnitModalState>({
     open: false,
     product: null,
@@ -509,6 +512,66 @@ export default function SalePage(): JSX.Element {
       setIsProcessingCashPayment(false);
     }
   }, [cashModal.amountReceived, saleId, saleStatus, subtotal]);
+
+  // PIX e cartão: não têm troco. Registram o meio de pagamento pelo valor total
+  // (para o relatório) e finalizam a venda direto, sem modal de valor recebido.
+  const confirmDirectPayment = useCallback(
+    async (method: "pix" | "card"): Promise<void> => {
+      if (
+        !saleId ||
+        saleStatus !== "open" ||
+        isProcessingDirectPayment ||
+        isProcessingCashPayment
+      ) {
+        return;
+      }
+
+      if (subtotal <= 0) return;
+
+      setIsProcessingDirectPayment(true);
+      setErrorMessage(null);
+      try {
+        await window.api.paymentCreate({
+          sale_id: saleId,
+          method,
+          amount: subtotal,
+          change_amount: 0,
+          status: "confirmed"
+        });
+        const completeResult = await window.api.saleComplete({ saleId });
+        uiStoreActions.setSaleStatus("completed");
+        if (completeResult.printerOffline) {
+          toast.warning(
+            "Impressora offline: venda concluída, comprovante não impresso."
+          );
+        }
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Falha ao finalizar pagamento.";
+        if (message.startsWith("[PRINTER_OFFLINE]")) {
+          uiStoreActions.setSaleStatus("completed");
+          setPrinterWarning({
+            open: true,
+            saleId,
+            message: message.replace("[PRINTER_OFFLINE] ", "")
+          });
+        } else {
+          setErrorMessage(message);
+        }
+      } finally {
+        setIsProcessingDirectPayment(false);
+      }
+    },
+    [
+      isProcessingCashPayment,
+      isProcessingDirectPayment,
+      saleId,
+      saleStatus,
+      subtotal
+    ]
+  );
 
   const closeOpenModal = useCallback((): boolean => {
     if (cashModal.open) {
@@ -1305,7 +1368,13 @@ export default function SalePage(): JSX.Element {
             <div className="grid grid-cols-3 gap-2.5 px-6">
               <button
                 onClick={openCashModal}
-                disabled={!saleId || saleStatus !== "open"}
+                disabled={
+                  !saleId ||
+                  saleStatus !== "open" ||
+                  subtotal <= 0 ||
+                  isProcessingCashPayment ||
+                  isProcessingDirectPayment
+                }
                 className="flex flex-col items-start rounded-lg bg-[#11ad7d] px-4 py-3.5 text-sm font-semibold text-[#063f2d] transition-colors hover:bg-[#14c48e] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <span className="flex items-center gap-2">
@@ -1316,30 +1385,44 @@ export default function SalePage(): JSX.Element {
               </button>
               <button
                 type="button"
-                disabled
-                aria-label="PIX (em breve)"
-                className="flex cursor-not-allowed flex-col items-start rounded-lg border border-warning/40 bg-[#2d2612]/50 px-4 py-3.5 text-sm font-medium text-warning/60"
+                onClick={() => void confirmDirectPayment("pix")}
+                disabled={
+                  !saleId ||
+                  saleStatus !== "open" ||
+                  subtotal <= 0 ||
+                  isProcessingCashPayment ||
+                  isProcessingDirectPayment
+                }
+                aria-label="Pagar com PIX"
+                className="flex flex-col items-start rounded-lg bg-[#f4ae2f] px-4 py-3.5 text-sm font-semibold text-[#3a2c05] transition-colors hover:bg-[#ffbe4d] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <span className="flex items-center gap-2">
                   <QrCode className="size-4" />
                   PIX
                 </span>
-                <span className="mt-0.5 text-[11px] uppercase tracking-wide opacity-80">
-                  Em breve
+                <span className="mt-0.5 text-xs opacity-70">
+                  F4
                 </span>
               </button>
               <button
                 type="button"
-                disabled
-                aria-label="Cartão Point (em breve)"
-                className="flex cursor-not-allowed flex-col items-start rounded-lg border border-info/40 bg-[#0e2337]/50 px-4 py-3.5 text-sm font-medium text-info/60"
+                onClick={() => void confirmDirectPayment("card")}
+                disabled={
+                  !saleId ||
+                  saleStatus !== "open" ||
+                  subtotal <= 0 ||
+                  isProcessingCashPayment ||
+                  isProcessingDirectPayment
+                }
+                aria-label="Pagar com cartão"
+                className="flex flex-col items-start rounded-lg bg-[#2f81f7] px-4 py-3.5 text-sm font-semibold text-[#04122b] transition-colors hover:bg-[#4f9bff] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <span className="flex items-center gap-2">
                   <CreditCard className="size-4" />
-                  Cartão (Point)
+                  Cartão
                 </span>
-                <span className="mt-0.5 text-[11px] uppercase tracking-wide opacity-80">
-                  Em breve
+                <span className="mt-0.5 text-xs font-normal opacity-70">
+                  F5
                 </span>
               </button>
             </div>
