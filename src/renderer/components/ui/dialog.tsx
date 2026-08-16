@@ -30,7 +30,7 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
->(({ className, children, ...props }, ref) => (
+>(({ className, children, onEscapeKeyDown, ...props }, ref) => (
   <DialogPortal>
     <DialogOverlay />
     <DialogPrimitive.Content
@@ -39,6 +39,11 @@ const DialogContent = React.forwardRef<
         "fixed left-[50%] top-[50%] z-50 grid w-full max-w-md translate-x-[-50%] translate-y-[-50%] gap-4 rounded-xl border border-border bg-popover p-5 text-popover-foreground shadow-2xl shadow-black/50 duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
         className
       )}
+      // O fechamento por Esc é controlado por um handler global de teclado na
+      // página (closeOpenModal). Se deixarmos o Radix fechar sozinho, ele o faz
+      // antes do handler global rodar e, no mesmo evento, o global reabre o
+      // modal de cancelamento. Callers ainda podem passar seu próprio handler.
+      onEscapeKeyDown={onEscapeKeyDown ?? ((event) => event.preventDefault())}
       {...props}
     >
       {children}
