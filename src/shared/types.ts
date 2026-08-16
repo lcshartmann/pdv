@@ -75,6 +75,13 @@ export interface SaleCompleteRequest {
   saleId: number;
 }
 
+export interface SaleCompleteResponse {
+  /** true quando o comprovante foi impresso com sucesso. */
+  printed: boolean;
+  /** true quando a impressão foi pulada por a impressora estar offline. */
+  printerOffline: boolean;
+}
+
 export interface SaleCancelRequest {
   saleId: number;
 }
@@ -292,11 +299,74 @@ export interface ReportsSaleDetailResponse {
   items: ReportsSaleDetailItem[];
 }
 
+export type PrinterType = "usb" | "network" | "file";
+
+/** Configuração completa do app, persistida na tabela `setting` (key/value). */
+export interface AppSettings {
+  // Balança
+  scalePort: string;
+  scaleBaudRate: number;
+  scaleTimeoutMs: number;
+  scaleStableFramesRequired: number;
+  scaleReconnectDelayMs: number;
+  scaleUsbPollIntervalMs: number;
+  // Impressora
+  printerType: PrinterType;
+  printerAddress: string;
+  // Identidade & recibo
+  storeName: string;
+  receiptFooter: string;
+  receiptShowQr: boolean;
+  storeCnpj: string;
+  storeAddress: string;
+  storePhone: string;
+}
+
+export type SettingsUpdateRequest = Partial<AppSettings>;
+
+export interface SerialPortInfo {
+  path: string;
+  manufacturer: string | null;
+}
+
+export interface PrinterTestResponse {
+  ok: boolean;
+  /** mensagem de erro quando ok=false. */
+  error?: string;
+}
+
+export interface NetworkCheckResponse {
+  reachable: boolean;
+}
+
+export interface DataBackupResponse {
+  canceled: boolean;
+  path?: string;
+}
+
+export interface DataRestoreResponse {
+  canceled: boolean;
+  /** true quando o arquivo escolhido não é um banco válido do PDV. */
+  invalid?: boolean;
+  /** quando a restauração foi aplicada; o app reinicia em seguida. */
+  restored?: boolean;
+}
+
+export interface DataClearStockResponse {
+  cleared: boolean;
+}
+
 export interface ScaleStatus {
   connected: boolean;
   portPath: string;
   lastWeightKg: number | null;
   lastUpdateAt: string | null;
+}
+
+export interface PrinterStatus {
+  available: boolean;
+  type: "usb" | "network" | "file";
+  address: string;
 }
 
 export interface RendererApi {
@@ -305,7 +375,7 @@ export interface RendererApi {
   saleRemoveItem: (payload: SaleRemoveItemRequest) => Promise<void>;
   saleRemoveLastItem: (payload: SaleRemoveLastItemRequest) => Promise<void>;
   saleUpdateItemQuantity: (payload: SaleUpdateItemQuantityRequest) => Promise<SaleAddItemResponse>;
-  saleComplete: (payload: SaleCompleteRequest) => Promise<void>;
+  saleComplete: (payload: SaleCompleteRequest) => Promise<SaleCompleteResponse>;
   saleCancel: (payload: SaleCancelRequest) => Promise<void>;
   productList: () => Promise<Product[]>;
   categoryList: () => Promise<Category[]>;
@@ -322,4 +392,13 @@ export interface RendererApi {
   reportsReprintReceipt: (payload: { saleId: number }) => Promise<void>;
   scaleGetStatus: () => Promise<ScaleStatus>;
   scaleReadStableWeight: () => Promise<number>;
+  printerGetStatus: () => Promise<PrinterStatus>;
+  settingsGetAll: () => Promise<AppSettings>;
+  settingsUpdate: (payload: SettingsUpdateRequest) => Promise<AppSettings>;
+  listSerialPorts: () => Promise<SerialPortInfo[]>;
+  printerTest: () => Promise<PrinterTestResponse>;
+  printerCheckNetwork: (payload: { address: string }) => Promise<NetworkCheckResponse>;
+  dataBackup: () => Promise<DataBackupResponse>;
+  dataRestore: () => Promise<DataRestoreResponse>;
+  dataClearStock: () => Promise<DataClearStockResponse>;
 }
